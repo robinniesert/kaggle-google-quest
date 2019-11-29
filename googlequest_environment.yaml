@@ -1,0 +1,10 @@
+name: GoogleQuest
+
+dependencies:
+  - python=3.7
+  - numpy
+  - matplotlib
+  - seaborn
+  - pandas
+  - scikit-learn
+  - jupyter
