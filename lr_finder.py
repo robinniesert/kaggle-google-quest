@@ -9,8 +9,6 @@ from torch.utils.data import DataLoader
 from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
 
-from apex import amp
-
 from utils.helpers import update_ewma_lst
 
 
@@ -22,14 +20,13 @@ class LRFinder():
     EWMA_FACTOR = 0.9
     def __init__(self, start_lr:float=1e-6, end_lr:float=10, n_iter:int=100, 
                  divergence_factor:float=10, path:str='tmp/', 
-                 device:torch.device=torch.device('cuda'), mixed_prec=False,
-                 grad_accum=1):
+                 device:torch.device=torch.device('cuda'), grad_accum=1):
         self.start_lr, self.end_lr = start_lr, end_lr
         self.n_iter, self.divergence_factor = n_iter, divergence_factor
         self.tmp_file = f'{path}tmp_pre_lr_finder.pth'
         self.device = device
         self.losses, self.lrs, self.smooth_losses = None, None, None
-        self.mixed_prec, self.grad_accum = mixed_prec, grad_accum
+        self.grad_accum = grad_accum
         os.makedirs(path, exist_ok=True)
     
     def find_lr(self, model:Module, opt:torch.optim.Optimizer, dl:DataLoader, 
@@ -50,11 +47,7 @@ class LRFinder():
             preds = model(inputs)
             loss = loss_fn(preds, labels)
 
-            if self.mixed_prec:
-                with amp.scale_loss(loss, opt) as scaled_loss:
-                    scaled_loss.backward()
-            else: 
-                loss.backward()
+            loss.backward()
             
             if (i == 0) or (loss < best_loss): best_loss = loss
             if (loss / self.divergence_factor) > best_loss: break

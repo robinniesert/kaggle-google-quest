@@ -8,8 +8,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from tqdm import tqdm
 
-from apex import amp
-
 from utils.plotting import twin_plot
 from utils.helpers import update_avg, update_ewma_lst
 
@@ -19,9 +17,9 @@ class Learner():
     def __init__(self, model, optimizer, train_loader, valid_loader, loss_fn, 
                  device, n_epochs, model_name, checkpoint_dir, scheduler=None, 
                  metric_fns={}, monitor_metric='loss', minimize_score=True, 
-                 logger=None, grad_accum=1, grad_clip=5.0, early_stopping=None, 
-                 batch_step_scheduler=True, task='segmentation', mixed_prec=False, 
-                 weight_averaging=False, eval_at_start=False, n_top_models=None):
+                 logger=None, grad_accum=1, grad_clip=100.0, early_stopping=None, 
+                 batch_step_scheduler=True, weight_averaging=False, 
+                 eval_at_start=False, n_top_models=None):
         self.model = model
         self.train_loader = train_loader
         self.valid_loader = valid_loader
@@ -40,7 +38,6 @@ class Learner():
         self.grad_clip = grad_clip
         self.early_stopping = early_stopping
         self.batch_step_scheduler = batch_step_scheduler
-        self.mixed_prec = mixed_prec
         self.weight_averaging = weight_averaging
         self.eval_at_start = eval_at_start
         self.n_top_models = n_top_models 
@@ -53,11 +50,12 @@ class Learner():
         self.train_metrics = {k: [] for k in self.metric_fns}
         self.valid_metrics = {k: [] for k in self.metric_fns}
         self.smooth_train_metrics  = {k: [] for k in self.metric_fns}
-        
-        self.task, self.compute_pr_auc = task, False
-        if self.task == 'classification':
-            self.compute_pr_auc = True
-            self.train_metrics['PR-AUC'], self.valid_metrics['PR-AUC'] = [], []
+
+        if self.monitor_metric == 'loss':
+            self.batch_update_score_as_loss = True
+        else:
+            monitor_update_type = self.metric_fns[self.monitor_metric][1]
+            self.batch_update_score_as_loss = monitor_update_type != 'batch_end'
     
     @property
     def best_checkpoint_file(self): 
@@ -92,9 +90,8 @@ class Learner():
         for epoch in range(self.n_epochs):
             self.logger.info('epoch {}: \t Start training...'.format(epoch))
 
-            if self.compute_pr_auc:
-                self.train_preds, self.train_labels = [], []
-                self.valid_preds, self.valid_labels = [], []
+            self.train_preds, self.train_targets = [], []
+            self.valid_preds, self.valid_targets = [], []
 
             self.model.train()
             train_loss, train_metrics = self.train_epoch()
@@ -107,8 +104,8 @@ class Learner():
             self.logger.info(self._get_metric_string(
                 epoch, val_loss, val_metrics, 'valid'))
             
-            if ((self.minimize_score and (val_score < self.best_score))
-                or ((not self.minimize_score) and (val_score > self.best_score))):
+            if ((self.minimize_score and (val_score < self.best_score)) or 
+                ((not self.minimize_score) and (val_score > self.best_score))):
                 self.best_score, self.best_epoch = val_score, epoch
                 self.save_model(self.best_checkpoint_file)
                 self.logger.info(
@@ -136,27 +133,27 @@ class Learner():
         tqdm_loader = tqdm(self.train_loader)
         curr_loss_avg, curr_metric_avgs = 0, {k: 0 for k in self.metric_fns}
 
-        for batch_idx, (imgs, labels) in enumerate(tqdm_loader):
-            imgs, labels = imgs.to(self.device), labels.to(self.device)
-            preds, loss = self.train_batch(imgs, labels, batch_idx)
-
-            if self.compute_pr_auc: 
-                self.train_preds.append(preds)
-                self.train_labels.append(labels)
+        for batch_idx, (inputs, targets) in enumerate(tqdm_loader):
+            inputs, targets = self.to_device(inputs), targets.to(self.device)
+            preds, loss = self.train_batch(inputs, targets, batch_idx)
+            
+            self.train_preds.append(preds)
+            self.train_targets.append(targets)
 
             curr_loss_avg, curr_metric_avgs = self._update_metrics(
-                curr_loss_avg, loss, curr_metric_avgs, preds, labels, 
+                curr_loss_avg, loss, curr_metric_avgs, preds, targets, 
                 batch_idx
             )
             
             base_lr = self.optimizer.param_groups[0]['lr']
             tqdm_loader.set_description('loss: {:.4} base_lr: {:.6}'.format(
                 round(curr_loss_avg, 4), round(base_lr, 6)))
-        
-        if self.compute_pr_auc:
-            pr_auc_val = pr_auc(self.train_preds, self.train_labels)
-            curr_metric_avgs['PR-AUC'] = pr_auc_val
-            self.train_metrics['PR-AUC'].append(pr_auc_val)
+
+        for k, (metric_fn, update_type) in self.metric_fns:
+            if update_type == 'epoch_end':
+                metric_val = metric_fn(self.train_preds, self.train_targets).item()
+                curr_metric_avgs[k] = metric_val
+                self.train_metrics[k].append(metric_val)
 
         return curr_loss_avg, curr_metric_avgs
     
@@ -164,67 +161,63 @@ class Learner():
         tqdm_loader = tqdm(self.valid_loader)
         curr_loss_avg, curr_metric_avgs = 0, {k: 0 for k in self.metric_fns}
         
-        for batch_idx, (imgs, labels) in enumerate(tqdm_loader):
+        for batch_idx, (inputs, targets) in enumerate(tqdm_loader):
             with torch.no_grad():
-                imgs, labels = imgs.to(self.device), labels.to(self.device)
-                preds, loss = self.valid_batch(imgs, labels)
-                
-                if self.compute_pr_auc: 
-                    self.valid_preds.append(preds)
-                    self.valid_labels.append(labels)
+                inputs, targets = self.to_device(inputs), targets.to(self.device)
+                preds, loss = self.valid_batch(inputs, targets)
+
+                self.valid_preds.append(preds)
+                self.valid_targets.append(targets)
 
                 curr_loss_avg, curr_metric_avgs = self._update_metrics(
-                    curr_loss_avg, loss, curr_metric_avgs, preds, labels, 
+                    curr_loss_avg, loss, curr_metric_avgs, preds, targets, 
                     batch_idx, train=False
                 )
-                if self.monitor_metric in ['loss', 'PR-AUC']: 
-                    score = curr_loss_avg
+                if self.batch_update_score_as_loss: score = curr_loss_avg
                 else: score = curr_metric_avgs[self.monitor_metric]
                 
                 tqdm_loader.set_description(
                     'score: {:.4}'.format(round(score, 4)))
+
+        for k, (metric_fn, update_type) in self.metric_fns:
+            if update_type == 'epoch_end':
+                metric_val = metric_fn(self.valid_preds, self.valid_targets).item()
+                curr_metric_avgs[k] = metric_val
+                if self.monitor_metric==k: score = metric_val
         
         self.scores.append(score)
         self.valid_losses.append(curr_loss_avg)
         for k in self.metric_fns: 
             self.valid_metrics[k].append(curr_metric_avgs[k])
 
-        if self.compute_pr_auc:
-            pr_auc_val = pr_auc(self.valid_preds, self.valid_labels)
-            curr_metric_avgs['PR-AUC'] = pr_auc_val
-            self.valid_metrics['PR-AUC'].append(pr_auc_val)
-            if self.monitor_metric=='PR-AUC': score = pr_auc_val
-
         return score, curr_loss_avg, curr_metric_avgs
     
-    def train_batch(self, batch_imgs, batch_labels, batch_idx):
-        preds, loss = self.get_loss_batch(batch_imgs, batch_labels)
+    def train_batch(self, batch_inputs, batch_targets, batch_idx):
+        preds, loss = self.get_loss_batch(batch_inputs, batch_targets)
 
-        if self.mixed_prec:
-            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else: 
-            loss.backward()
+        loss.backward()
 
         if batch_idx % self.grad_accum == self.grad_accum - 1:
-            if self.mixed_prec:
-                clip_grad_norm_(amp.master_params(self.optimizer), self.grad_clip)
-            else:
-                clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.optimizer.step()
             self.optimizer.zero_grad()
 
         if self.batch_step_scheduler: self._step_scheduler()
         return preds, loss.item()
     
-    def valid_batch(self, batch_imgs, batch_labels):
-        preds, loss = self.get_loss_batch(batch_imgs, batch_labels)
+    def valid_batch(self, batch_inputs, batch_targets):
+        preds, loss = self.get_loss_batch(batch_inputs, batch_targets)
         return preds, loss.item()
     
-    def get_loss_batch(self, batch_imgs, batch_labels):
-        preds = self.model(batch_imgs)
-        loss = self.loss_fn(preds, batch_labels)
+    def get_loss_batch(self, batch_inputs, batch_targets):
+        preds = self.model(batch_inputs)
+        loss = self.loss_fn(preds, batch_targets)
         return preds, loss
+
+    def to_device(self, xs):
+        if isinstance(xs, tuple) or isinstance(xs, list):
+            return [x.to(self.device) for x in xs]
+        else: return xs.to(self.device)
     
     def load_best_model(self, epoch=None):
         if epoch: checkpoint = torch.load(self.checkpoint_file(epoch))
@@ -273,20 +266,21 @@ class Learner():
                     update_avg(pars_swa[k].data, pars[k].data, epoch))
     
     def _update_metrics(self, curr_loss_avg, loss, curr_metric_avgs, 
-                        preds, labels, batch_idx, train=True):
+                        preds, targets, batch_idx, train=True):
         curr_loss_avg = update_avg(curr_loss_avg, loss, batch_idx)
         if train:
             self.train_losses.append(loss)
             update_ewma_lst(self.smooth_train_losses, loss, self.EWMA_FACTOR)
         
-        for k in self.metric_fns:
-            metric_val = self.metric_fns[k](preds, labels).item()
-            curr_metric_avgs[k] = update_avg(
-                curr_metric_avgs[k], metric_val, batch_idx)
-            if train:
-                self.train_metrics[k].append(metric_val)
-                update_ewma_lst(self.smooth_train_metrics[k], metric_val, 
-                                self.EWMA_FACTOR)
+        for k, (metric_fn, update_type) in self.metric_fns:
+            if update_type == 'batch_end':
+                metric_val = metric_fn(preds, targets).item()
+                curr_metric_avgs[k] = update_avg(
+                    curr_metric_avgs[k], metric_val, batch_idx)
+                if train:
+                    self.train_metrics[k].append(metric_val)
+                    update_ewma_lst(self.smooth_train_metrics[k], metric_val, 
+                                    self.EWMA_FACTOR)
         
         return curr_loss_avg, curr_metric_avgs
     
@@ -317,9 +311,9 @@ class Learner():
     def _update_batch_norm(self):
         # run one forward pass of train data to update batch norm running stats
         self.swa_model.train()
-        for imgs, _ in tqdm(self.train_loader):
-            imgs = imgs.to(self.device)
-            self.swa_model(imgs)
+        for inputs, _ in tqdm(self.train_loader):
+            inputs = self.to_device(inputs)
+            self.swa_model(inputs)
         self.swa_model.eval()
 
     def plot_losses(self, smooth=True):
@@ -336,8 +330,9 @@ class Learner():
     
     def plot_metric(self, metric_name, smooth=True):
         k = metric_name
+        ax1_label = 'Step' if self.metric_fns[k][1] == 'batch_end' else 'Epoch'
         if smooth: train_vals = self.smooth_train_metrics[k] 
         else: train_vals = self.train_metrics[k]
-        twin_plot(train_vals, self.valid_metrics[k], ax1_label='Step', 
+        twin_plot(train_vals, self.valid_metrics[k], ax1_label=ax1_label, 
                   ax2_label='Epoch', y_label=k, label1='train', label2='valid')
  
