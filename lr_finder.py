@@ -10,6 +10,7 @@ from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
 
 from utils.helpers import update_ewma_lst
+from utils.torch import to_device
 
 
 def expspace(s, e, n=100):
@@ -41,11 +42,11 @@ class LRFinder():
         self.losses, self.smooth_losses = [], []
         data_iter, best_loss = iter(dl), 1e6
         for i in tqdm(range(self.n_iter)):
-            inputs, labels = next(data_iter)
-            inputs, labels = inputs.to(self.device), labels.to(self.device)
+            inputs, targets = next(data_iter)
+            inputs, targets = to_device(inputs, self.device), targets.to(self.device)
             
-            preds = model(inputs)
-            loss = loss_fn(preds, labels)
+            preds = model(*inputs)
+            loss = loss_fn(preds, targets)
 
             loss.backward()
             

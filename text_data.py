@@ -6,17 +6,17 @@ class TextDataset(Dataset):
 
     def __init__(self, question_data, answer_data, title_data, category_data, 
                  host_data, use_embeddings, dist_features, idxs, targets=None):
-        self.question_data = question_data[idxs]
-        self.answer_data = answer_data[idxs]
-        self.title_data = title_data[idxs]
-        self.category_data = category_data[idxs]
-        self.host_data = host_data[idxs]
-        self.use_embeddings_q = use_embeddings['question_body_embedding'][idxs]
-        self.use_embeddings_a = use_embeddings['answer_embedding'][idxs]
-        self.use_embeddings_t = use_embeddings['question_title_embedding'][idxs]
-        self.dist_features = dist_features[idxs]
-        if targets is not None: self.targets = targets[idxs]  
-        else: self.targets = np.zeros((self.question_data.shape[0], 30))
+        self.question_data = question_data[idxs].astype(np.long)
+        self.answer_data = answer_data[idxs].astype(np.long)
+        self.title_data = title_data[idxs].astype(np.long)
+        self.category_data = category_data[idxs].astype(np.long)
+        self.host_data = host_data[idxs].astype(np.long)
+        self.use_embeddings_q = use_embeddings['question_body_embedding'][idxs].astype(np.float32)
+        self.use_embeddings_a = use_embeddings['answer_embedding'][idxs].astype(np.float32)
+        self.use_embeddings_t = use_embeddings['question_title_embedding'][idxs].astype(np.float32)
+        self.dist_features = dist_features[idxs].astype(np.float32)
+        if targets is not None: self.targets = targets[idxs].astype(np.float32)
+        else: self.targets = np.zeros((self.question_data.shape[0], 30), dtype=np.float32)
 
     def __getitem__(self, idx):
         question = self.question_data[idx]
@@ -31,7 +31,7 @@ class TextDataset(Dataset):
         target = self.targets[idx]
 
         return (question, answer, title, category, host, use_emb_q, use_emb_a, 
-                use_emb_t, dist_feature, target)
+                use_emb_t, dist_feature), target
 
     def __len__(self):
         return len(self.question_data)

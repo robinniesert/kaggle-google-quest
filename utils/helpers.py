@@ -11,8 +11,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from common import CLASSES
-
 
 def load_yaml(file_name):
     with open(file_name, 'r') as stream:

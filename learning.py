@@ -6,10 +6,11 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from tqdm import tqdm
+from tqdm import tqdm_notebook as tqdm
 
 from utils.plotting import twin_plot
 from utils.helpers import update_avg, update_ewma_lst
+from utils.torch import to_device
 
 class Learner():
     EWMA_FACTOR = 0.9
@@ -73,43 +74,43 @@ class Learner():
         
         if self.eval_at_start:
             epoch = -1
-            self.logger.info('epoch {}: \t Start validation...'.format(epoch))
+            self.info('epoch {}: \t Start validation...'.format(epoch))
             self.model.eval()
             val_score, val_loss, val_metrics = self.valid_epoch()
-            self.logger.info(self._get_metric_string(
+            self.info(self._get_metric_string(
                 epoch, val_loss, val_metrics, 'valid'))
             
             self.best_score, self.best_epoch = val_score, epoch
             self.save_model(self.best_checkpoint_file)
-            self.logger.info(
-                'best model: epoch {} - {:.5}'.format(epoch, val_score))
+            self.info('best model: epoch {} - {:.5}'.format(epoch, val_score))
 
             if self.n_top_models:
                 self._update_top_models(epoch, val_score)
 
         for epoch in range(self.n_epochs):
-            self.logger.info('epoch {}: \t Start training...'.format(epoch))
+            self.info('epoch {}: \t Start training...'.format(epoch))
 
             self.train_preds, self.train_targets = [], []
             self.valid_preds, self.valid_targets = [], []
 
             self.model.train()
             train_loss, train_metrics = self.train_epoch()
-            self.logger.info(self._get_metric_string(
+            self.info(self._get_metric_string(
                 epoch, train_loss, train_metrics))
             
-            self.logger.info('epoch {}: \t Start validation...'.format(epoch))
+            self.info('epoch {}: \t Start validation...'.format(epoch))
             self.model.eval()
             val_score, val_loss, val_metrics = self.valid_epoch()
-            self.logger.info(self._get_metric_string(
+            self.info(self._get_metric_string(
                 epoch, val_loss, val_metrics, 'valid'))
             
             if ((self.minimize_score and (val_score < self.best_score)) or 
                 ((not self.minimize_score) and (val_score > self.best_score))):
                 self.best_score, self.best_epoch = val_score, epoch
                 self.save_model(self.best_checkpoint_file)
-                self.logger.info(
-                    'best model: epoch {} - {:.5}'.format(epoch, val_score))
+                self.info('best model: epoch {} - {:.5}'.format(epoch, val_score))
+            else:
+                self.info(f'model not improved for {epoch-self.best_epoch} epochs')
 
             if self.n_top_models: 
                 self._update_top_models(epoch, val_score)
@@ -119,11 +120,11 @@ class Learner():
             
             self.lrs.append(self.optimizer.param_groups[0]['lr'])
             
-            if not self.batch_step_scheduler: self._step_scheduler(val_score)
+            if not self.batch_step_scheduler: self._step_scheduler(val_loss)
             
             if self.early_stopping is not None:
                 if epoch - self.best_epoch > self.early_stopping:
-                    self.logger.info('EARLY STOPPING')
+                    self.info('EARLY STOPPING')
                     self._on_training_end()
                     return
                 
@@ -149,9 +150,11 @@ class Learner():
             tqdm_loader.set_description('loss: {:.4} base_lr: {:.6}'.format(
                 round(curr_loss_avg, 4), round(base_lr, 6)))
 
-        for k, (metric_fn, update_type) in self.metric_fns:
+        for k, (metric_fn, update_type) in self.metric_fns.items():
             if update_type == 'epoch_end':
-                metric_val = metric_fn(self.train_preds, self.train_targets).item()
+                metric_val = metric_fn(
+                    torch.cat(self.train_preds), torch.cat(self.train_targets)
+                ).item()
                 curr_metric_avgs[k] = metric_val
                 self.train_metrics[k].append(metric_val)
 
@@ -179,9 +182,11 @@ class Learner():
                 tqdm_loader.set_description(
                     'score: {:.4}'.format(round(score, 4)))
 
-        for k, (metric_fn, update_type) in self.metric_fns:
+        for k, (metric_fn, update_type) in self.metric_fns.items():
             if update_type == 'epoch_end':
-                metric_val = metric_fn(self.valid_preds, self.valid_targets).item()
+                metric_val = metric_fn(
+                    torch.cat(self.valid_preds), torch.cat(self.valid_targets)
+                ).item()
                 curr_metric_avgs[k] = metric_val
                 if self.monitor_metric==k: score = metric_val
         
@@ -210,14 +215,12 @@ class Learner():
         return preds, loss.item()
     
     def get_loss_batch(self, batch_inputs, batch_targets):
-        preds = self.model(batch_inputs)
+        preds = self.model(*batch_inputs)
         loss = self.loss_fn(preds, batch_targets)
         return preds, loss
 
     def to_device(self, xs):
-        if isinstance(xs, tuple) or isinstance(xs, list):
-            return [x.to(self.device) for x in xs]
-        else: return xs.to(self.device)
+        return to_device(xs, self.device)
     
     def load_best_model(self, epoch=None):
         if epoch: checkpoint = torch.load(self.checkpoint_file(epoch))
@@ -232,6 +235,10 @@ class Learner():
 
     def checkpoint_file(self, epoch): 
         return f'{self.checkpoint_dir}{self.model_name}_epoch_{epoch}.pth'
+
+    def info(self, s):
+        if self.logger is not None: self.logger.info(s)
+        else: print(s)
 
     def _get_metric_string(self, epoch, loss, metrics, stage='train'):
         base_str = 'epoch {}/{} \t {} : loss {:.5}'.format(
@@ -252,7 +259,7 @@ class Learner():
 
             if rm_epoch != epoch:
                 self.top_epochs = [e for _, e in self.top_scores]
-                self.logger.info(
+                self.info(
                     f'Updated top {self.n_top_models} models: '
                     f'removing epoch {rm_epoch} - new top epochs {self.top_epochs}'
                 )
@@ -272,7 +279,7 @@ class Learner():
             self.train_losses.append(loss)
             update_ewma_lst(self.smooth_train_losses, loss, self.EWMA_FACTOR)
         
-        for k, (metric_fn, update_type) in self.metric_fns:
+        for k, (metric_fn, update_type) in self.metric_fns.items():
             if update_type == 'batch_end':
                 metric_val = metric_fn(preds, targets).item()
                 curr_metric_avgs[k] = update_avg(
@@ -292,20 +299,19 @@ class Learner():
             
     def _on_training_end(self):
         if self.weight_averaging:
-            self.logger.info(
-                'epoch {}: \t Start SWA validation...'.format(self.n_epochs))
+            self.info('epoch {}: \t Start SWA validation...'.format(self.n_epochs))
             self._update_batch_norm()
             self.save_model(self.swa_checkpoint_file)
             self.model = copy.deepcopy(self.swa_model)
             self.model.to(self.device)
             _, val_loss, val_metrics = self.valid_epoch()
-            self.logger.info(self._get_metric_string(
+            self.info(self._get_metric_string(
                 self.n_epochs, val_loss, val_metrics, 'SWA'))
         if self.n_top_models:
             for epoch in range(-int(self.eval_at_start), self.n_epochs):
                 if epoch not in self.top_epochs:
                     os.remove(self.checkpoint_file(epoch))
-        self.logger.info('TRAINING END: Best score achieved on epoch '
+        self.info('TRAINING END: Best score achieved on epoch '
                          f'{self.best_epoch} - {self.best_score:.5f}')
             
     def _update_batch_norm(self):
