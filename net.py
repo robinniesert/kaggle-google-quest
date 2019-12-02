@@ -89,7 +89,6 @@ class NeuralNet5(nn.Module):
 
         self.linear_q_add = nn.Linear(n_word, hidden_size)
         self.linear_q_add1 = nn.Linear(hidden_size, hidden_size//4)
-        self.bilinear_add = nn.Bilinear(hidden_size//4, hidden_size//4, N_TARGETS)
 
         self.lstm_q = nn.LSTM(n_word, hidden_size, bidirectional=True, batch_first=True)
         self.gru_q = nn.GRU(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
@@ -143,6 +142,8 @@ class NeuralNet5(nn.Module):
 
         n_aq_out = (hidden_size // 4) - n_q_out
         self.linear_aq_out = nn.Linear(hidden_size//2,  n_aq_out)
+        
+        self.bilinear_add = nn.Bilinear(hidden_size//4, hidden_size//4, N_TARGETS)
 
     def forward(self, question, answer, title, category, host, use_emb_q, use_emb_a, use_emb_t, dist_feature):
         h_embedding_q = self.embedding(question)

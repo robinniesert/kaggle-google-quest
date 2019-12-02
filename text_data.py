@@ -1,6 +1,8 @@
 import numpy as np
 from torch.utils.data import Dataset
 
+from common import N_TARGETS
+
 
 class TextDataset(Dataset):
 
@@ -16,7 +18,7 @@ class TextDataset(Dataset):
         self.use_embeddings_t = use_embeddings['question_title_embedding'][idxs].astype(np.float32)
         self.dist_features = dist_features[idxs].astype(np.float32)
         if targets is not None: self.targets = targets[idxs].astype(np.float32)
-        else: self.targets = np.zeros((self.question_data.shape[0], 30), dtype=np.float32)
+        else: self.targets = np.zeros((self.question_data.shape[0], N_TARGETS), dtype=np.float32)
 
     def __getitem__(self, idx):
         question = self.question_data[idx]

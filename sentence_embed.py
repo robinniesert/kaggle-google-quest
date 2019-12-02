@@ -2,16 +2,20 @@ import os
 import numpy as np
 import pandas as pd
 
+from tqdm import tqdm
+
+import torch
+
 import tensorflow_hub as hub
 import tensorflow.keras.backend as K
+
+import transformers
 
 
 def get_use_embedding_features(train, test, input_columns, use_feature_path=''):
     """
     https://www.kaggle.com/ragnar123/simple-lgbm-solution-baseline?scriptVersionId=24198335
     """
-
-
     # create empty dictionaries to store final results
     embedding_train = {}
     embedding_test = {}
@@ -72,3 +76,69 @@ def get_use_embedding_features(train, test, input_columns, use_feature_path=''):
         K.clear_session()
         
     return embedding_train, embedding_test
+
+
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+
+def get_distill_bert_features(train, test, text_columns, batch_size=64, 
+                              distill_bert_feature_path=''):
+    # inspired by https://jalammar.github.io/a-visual-guide-to-using-bert-for-the-first-time/
+
+    # create empty dictionaries to store final results
+    features_train = {}
+    features_test = {}
+    
+    if os.path.isdir(distill_bert_feature_path):
+        for text in text_columns:
+            features_train[text] = pd.read_csv(
+                f'{distill_bert_feature_path}{text}_train.csv', index_col=0
+            ).values
+            features_test[text] = pd.read_csv(
+                f'{distill_bert_feature_path}{text}_test.csv', index_col=0
+            ).values
+
+    else:
+        if distill_bert_feature_path != '': 
+            os.makedirs(distill_bert_feature_path, exist_ok=True)
+
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        tokenizer = transformers.DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        model = transformers.DistilBertModel.from_pretrained('distilbert-base-uncased')
+        model.to(device)
+        for text in text_columns:
+            for mode, df in [('train', train), ('test', test)]:
+                fin_features = []
+                for data in tqdm(list(chunks(df[text].values, batch_size))):
+                    max_len = 512
+                    tokenized = []
+                    for x in data:
+                        x = " ".join(x.strip().split()[:300])
+                        tok = tokenizer.encode(x, add_special_tokens=True)
+                        tokenized.append(tok[:max_len])
+
+                    padded = np.array([i + [0] * (max_len - len(i)) for i in tokenized])
+                    attention_mask = np.where(padded != 0, 1, 0)
+                    input_ids = torch.tensor(padded).to(device)
+                    attention_mask = torch.tensor(attention_mask).to(device)
+
+                    with torch.no_grad():
+                        last_hidden_states = model(input_ids, attention_mask=attention_mask)
+
+                    fin_features.append(last_hidden_states[0][:, 0, :].cpu().numpy())
+
+                if mode == 'train':
+                    features_train[text] = np.vstack(fin_features)
+                else:
+                    features_test[text] = np.vstack(fin_features)
+
+            if distill_bert_feature_path != '':
+                pd.DataFrame(features_train[text]).to_csv(
+                    f'{distill_bert_feature_path}{text}_train.csv')
+                pd.DataFrame(features_test[text]).to_csv(
+                    f'{distill_bert_feature_path}{text}_test.csv')
+                
+    return features_train, features_test
