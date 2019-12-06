@@ -142,9 +142,7 @@ class Learner():
             self.train_targets.append(to_cpu(targets))
 
             curr_loss_avg, curr_metric_avgs = self._update_metrics(
-                curr_loss_avg, loss, curr_metric_avgs, preds, targets, 
-                batch_idx
-            )
+                curr_loss_avg, loss, curr_metric_avgs, preds, targets, batch_idx)
             
             base_lr = self.optimizer.param_groups[0]['lr']
             tqdm_loader.set_description('loss: {:.4} base_lr: {:.6}'.format(
