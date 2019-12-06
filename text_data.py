@@ -37,3 +37,62 @@ class TextDataset(Dataset):
 
     def __len__(self):
         return len(self.question_data)
+
+class TextDataset2(Dataset):
+
+    def __init__(self, x_features, x_question_emb, x_answer_emb, x_title_emb, 
+                 question_ids, answer_ids, title_ids, idxs, targets=None):
+        self.question_ids = question_ids[idxs].astype(np.long)
+        self.answer_ids = answer_ids[idxs].astype(np.long)
+        self.title_ids = title_ids[idxs].astype(np.long)
+        self.x_question_emb = x_question_emb[idxs].astype(np.float32)
+        self.x_answer_emb = x_answer_emb[idxs].astype(np.float32)
+        self.x_title_emb = x_title_emb[idxs].astype(np.float32)
+        self.x_features = x_features[idxs].astype(np.float32)
+        if targets is not None: self.targets = targets[idxs].astype(np.float32)
+        else: self.targets = np.zeros((self.x_question_emb.shape[0], N_TARGETS), dtype=np.float32)
+
+    def __getitem__(self, idx):
+        q_ids = self.question_ids[idx]
+        a_ids = self.answer_ids[idx]
+        # t_ids = self.title_ids[idx]
+        q_att_mask = np.where(q_ids != 0, 1, 0)
+        a_att_mask = np.where(a_ids != 0, 1, 0)
+        # t_att_mask = np.where(t_ids != 0, 1, 0)
+        x_q_emb = self.x_question_emb[idx]
+        x_a_emb = self.x_answer_emb[idx]
+        x_t_emb = self.x_title_emb[idx]
+        x_feats = self.x_features[idx]
+        target = self.targets[idx]
+        return (x_feats, x_q_emb, x_t_emb, x_a_emb, q_ids, a_ids, q_att_mask, 
+                a_att_mask), target
+
+    def __len__(self):
+        return len(self.question_ids)
+
+
+class TextDataset3(Dataset):
+
+    def __init__(self, x_features, x_question_emb, x_answer_emb, x_title_emb, 
+                 x_question_bert, x_answer_bert, idxs, targets=None):
+        self.x_question_bert= x_question_bert[idxs].astype(np.float32)
+        self.x_answer_bert = x_answer_bert[idxs].astype(np.float32)
+        self.x_question_emb = x_question_emb[idxs].astype(np.float32)
+        self.x_answer_emb = x_answer_emb[idxs].astype(np.float32)
+        self.x_title_emb = x_title_emb[idxs].astype(np.float32)
+        self.x_features = x_features[idxs].astype(np.float32)
+        if targets is not None: self.targets = targets[idxs].astype(np.float32)
+        else: self.targets = np.zeros((self.x_question_emb.shape[0], N_TARGETS), dtype=np.float32)
+
+    def __getitem__(self, idx):
+        x_q_bert = self.x_question_bert[idx]
+        x_a_bert = self.x_answer_bert[idx]
+        x_q_emb = self.x_question_emb[idx]
+        x_a_emb = self.x_answer_emb[idx]
+        x_t_emb = self.x_title_emb[idx]
+        x_feats = self.x_features[idx]
+        target = self.targets[idx]
+        return (x_feats, x_q_emb, x_t_emb, x_a_emb, x_q_bert, x_a_bert), target
+
+    def __len__(self):
+        return len(self.x_features)

@@ -1,4 +1,6 @@
 N_TARGETS = 30
+N_Q_TARGETS = 21
+N_A_TARGETS = 9
 TARGETS = [
     'question_asker_intent_understanding', 'question_body_critical',
     'question_conversational', 'question_expect_short_answer',

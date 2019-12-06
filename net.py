@@ -130,8 +130,7 @@ class NeuralNet5(nn.Module):
             nn.Linear(2 * hidden_size + int(cat_emb) + int(host_emb) + 6, hidden_size//2),
             nn.BatchNorm1d(hidden_size//2), nn.ReLU(inplace=True), nn.Dropout(0.5)
         )
-        n_q_out = 2 * (hidden_size // 12)
-        self.linear_q_out = nn.Linear(hidden_size//2, n_q_out)
+        self.linear_q_out = nn.Linear(hidden_size//2, N_Q_TARGETS)
 
         self.bilinear = nn.Bilinear(hidden_size//2, hidden_size//2, hidden_size//2)
         self.bilinear_emb = nn.Bilinear(hidden_size//2, hidden_size//2, hidden_size//2)
@@ -140,8 +139,7 @@ class NeuralNet5(nn.Module):
                                      nn.ReLU(inplace=True),
                                      nn.Dropout(0.5))
 
-        n_aq_out = (hidden_size // 4) - n_q_out
-        self.linear_aq_out = nn.Linear(hidden_size//2,  n_aq_out)
+        self.linear_aq_out = nn.Linear(hidden_size//2,  N_A_TARGETS)
         
         self.bilinear_add = nn.Bilinear(hidden_size//4, hidden_size//4, N_TARGETS)
 
@@ -222,129 +220,3 @@ def linear_bn_act_drop(n_in, n_out, act=GELU(), bn=False, drop=0.0):
     layers.append(act)
     if drop > 1e-5: layers.append(nn.Dropout(drop))
     return nn.Sequential(*layers)
-
-    
-# class NeuralNet5(nn.Module):
-#     def __init__(self, hidden_size=128, max_len=500, max_len_title=30, n_cat=3,
-#                  cat_emb=6, n_host=55, host_emb=28, embedding_matrix=None):
-#         super(NeuralNet5, self).__init__()
-
-#         self.embedding = nn.Embedding(*embedding_matrix.shape)
-#         self.embedding.weight = nn.Parameter(torch.tensor(embedding_matrix, dtype=torch.float32))
-#         self.embedding.weight.requires_grad = False
-
-#         self.embedding_dropout = SpatialDropout(0.3)
-        
-#         self.category_embedding = nn.Embedding(n_cat, int(cat_emb))
-#         self.host_embedding = nn.Embedding(n_host, int(host_emb))
-
-#         self.linear_q_add = nn.Linear(300, 128)
-#         self.linear_q_add1 = nn.Linear(128, 30)
-#         self.bilinear_add = nn.Bilinear(30, 30, 30)
-
-#         self.lstm_q = nn.LSTM(300, hidden_size, bidirectional=True, batch_first=True)
-#         self.gru_q = nn.GRU(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
-
-#         self.lstm_a = nn.LSTM(300, hidden_size, bidirectional=True, batch_first=True)
-#         self.gru_a = nn.GRU(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
-
-#         self.lstm_t = nn.LSTM(300, hidden_size, bidirectional=True, batch_first=True)
-#         self.gru_t = nn.GRU(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
-
-#         self.lstm_attention_q = Attention(hidden_size * 2, max_len)
-#         self.gru_attention_q = Attention(hidden_size * 2, max_len)
-
-#         self.lstm_attention_a = Attention(hidden_size * 2, max_len)
-#         self.gru_attention_a = Attention(hidden_size * 2, max_len)
-
-#         self.lstm_attention_t = Attention(hidden_size * 2, max_len_title)
-#         self.gru_attention_t = Attention(hidden_size * 2, max_len_title)
-
-#         self.linear_q = linear_bn_act_drop(1024, 64)
-#         self.linear_a = linear_bn_act_drop(1024, 64)
-#         self.linear_t = linear_bn_act_drop(1024, 64)
-
-#         self.linear_q_emb = linear_bn_act_drop(512, 64)
-#         self.linear_a_emb = linear_bn_act_drop(512, 64)
-#         self.linear_t_emb = linear_bn_act_drop(512, 64)
-
-#         self.linear1 = linear_bn_act_drop(
-#             256 + int(cat_emb) + int(host_emb) + 6, 64, nn.ReLU(inplace=True), bn=True, drop=0.5)
-#         self.linear_q_out = nn.Linear(64, 21)
-
-#         self.bilinear = nn.Bilinear(64, 64, 64)
-#         self.bilinear_emb = nn.Bilinear(64, 64, 64)
-#         self.linear2 = linear_bn_act_drop(390, 64, nn.ReLU(inplace=True), bn=True, drop=0.5)
-
-#         self.linear_aq_out = nn.Linear(64, 9)
-
-#     def forward(self, question, answer, title, category, host, use_emb_q, 
-#                 use_emb_a, use_emb_t, dist_feature):
-#         h_embedding_q = self.embedding(question)
-#         h_embedding_q = self.embedding_dropout(h_embedding_q)
-
-#         h_lstm_q, _ = self.lstm_q(h_embedding_q)
-#         h_gru_q, _ = self.gru_q(h_lstm_q)
-
-#         h_lstm_atten_q = self.lstm_attention_q(h_lstm_q)
-#         h_gru_atten_q = self.gru_attention_q(h_gru_q)
-
-#         avg_pool_q = torch.mean(h_gru_q, 1)
-#         max_pool_q, _ = torch.max(h_gru_q, 1)
-
-#         h_embedding_a = self.embedding(answer)
-#         h_embedding_a = self.embedding_dropout(h_embedding_a)
-
-#         h_lstm_a, _ = self.lstm_a(h_embedding_a)
-#         h_gru_a, _ = self.gru_a(h_lstm_a)
-
-#         h_lstm_atten_a = self.lstm_attention_a(h_lstm_a)
-#         h_gru_atten_a = self.gru_attention_a(h_gru_a)
-
-#         avg_pool_a = torch.mean(h_gru_a, 1)
-#         max_pool_a, _ = torch.max(h_gru_a, 1)
-
-#         h_embedding_t = self.embedding(title)
-#         h_embedding_t = self.embedding_dropout(h_embedding_t)
-
-#         h_lstm_t, _ = self.lstm_t(h_embedding_t)
-#         h_gru_t, _ = self.gru_t(h_lstm_t)
-
-#         h_lstm_atten_t = self.lstm_attention_t(h_lstm_t)
-#         h_gru_atten_t = self.gru_attention_t(h_gru_t)
-
-#         avg_pool_t = torch.mean(h_gru_t, 1)
-#         max_pool_t, _ = torch.max(h_gru_t, 1)
-
-#         category = self.category_embedding(category)
-#         host = self.host_embedding(host)
-        
-#         add = torch.cat((h_embedding_q, h_embedding_a, h_embedding_t), 1)
-#         add = self.linear_q_add(torch.mean(add, 1))
-#         add = self.linear_q_add1(add)
-
-#         q = torch.cat((h_lstm_atten_q, h_gru_atten_q, avg_pool_q, max_pool_q), 1)
-#         a = torch.cat((h_lstm_atten_a, h_gru_atten_a, avg_pool_a, max_pool_a), 1)
-#         t = torch.cat((h_lstm_atten_t, h_gru_atten_t, avg_pool_t, max_pool_t), 1)
-        
-#         q = self.linear_q(q)
-#         a = self.linear_a(a)
-#         t = self.linear_t(t)
-
-#         q_emb = self.linear_q_emb(use_emb_q)
-#         a_emb = self.linear_a_emb(use_emb_a)
-#         t_emb = self.linear_t_emb(use_emb_t)
-        
-#         hidden_q = self.linear1(torch.cat((q, t, q_emb, t_emb, category, host, dist_feature), 1))
-#         q_result = self.linear_q_out(hidden_q)
-
-#         bil_sim = self.bilinear(q, a)
-#         bil_sim_emb = self.bilinear_emb(q_emb, a_emb)
-        
-#         hidden_aq = self.linear2(torch.cat((q, a, q_emb, a_emb, bil_sim, bil_sim_emb, dist_feature), 1))
-#         aq_result = self.linear_aq_out(hidden_aq)
-
-#         out = torch.cat([q_result, aq_result], 1)
-#         out = self.bilinear_add(out, add)
-
-#         return out

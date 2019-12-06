@@ -87,6 +87,7 @@ def chunks(l, n):
 def get_distill_bert_features(train, test, text_columns, batch_size=64, 
                               distill_bert_feature_path=''):
     # inspired by https://jalammar.github.io/a-visual-guide-to-using-bert-for-the-first-time/
+    max_len = 512
 
     # create empty dictionaries to store final results
     features_train = {}
@@ -113,7 +114,6 @@ def get_distill_bert_features(train, test, text_columns, batch_size=64,
             for mode, df in [('train', train), ('test', test)]:
                 fin_features = []
                 for data in tqdm(list(chunks(df[text].values, batch_size))):
-                    max_len = 512
                     tokenized = []
                     for x in data:
                         x = " ".join(x.strip().split()[:300])

@@ -1,6 +1,6 @@
 import os
 import copy
-import matplotlib.pyplot as plot
+import matplotlib.pyplot as plt
 
 import torch
 from torch.nn.utils import clip_grad_norm_
@@ -10,7 +10,7 @@ from tqdm import tqdm_notebook as tqdm
 
 from utils.plotting import twin_plot
 from utils.helpers import update_avg, update_ewma_lst
-from utils.torch import to_device
+from utils.torch import to_device, to_cpu
 
 class Learner():
     EWMA_FACTOR = 0.9
@@ -138,8 +138,8 @@ class Learner():
             inputs, targets = self.to_device(inputs), targets.to(self.device)
             preds, loss = self.train_batch(inputs, targets, batch_idx)
             
-            self.train_preds.append(preds)
-            self.train_targets.append(targets)
+            self.train_preds.append(to_cpu(preds))
+            self.train_targets.append(to_cpu(targets))
 
             curr_loss_avg, curr_metric_avgs = self._update_metrics(
                 curr_loss_avg, loss, curr_metric_avgs, preds, targets, 
@@ -169,8 +169,8 @@ class Learner():
                 inputs, targets = self.to_device(inputs), targets.to(self.device)
                 preds, loss = self.valid_batch(inputs, targets)
 
-                self.valid_preds.append(preds)
-                self.valid_targets.append(targets)
+                self.valid_preds.append(to_cpu(preds))
+                self.valid_targets.append(to_cpu(targets))
 
                 curr_loss_avg, curr_metric_avgs = self._update_metrics(
                     curr_loss_avg, loss, curr_metric_avgs, preds, targets, 

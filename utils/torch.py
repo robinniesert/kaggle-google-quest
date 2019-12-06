@@ -1,8 +1,12 @@
 import torch.nn as nn
 
 
+def to_cpu(x):
+    return x.contiguous().detach().cpu()
+
+
 def to_numpy(x):
-    return x.contiguous().detach().cpu().numpy()
+    return to_cpu(x).numpy()
 
 
 def to_device(xs, device):

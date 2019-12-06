@@ -30,7 +30,7 @@ def init_seed(seed=100):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.deterministic = True
 
     
 def init_logger(directory, log_file_name):
