@@ -162,23 +162,24 @@ class Learner():
         tqdm_loader = tqdm(self.valid_loader)
         curr_loss_avg, curr_metric_avgs = 0, {k: 0 for k in self.metric_fns}
         
-        for batch_idx, (inputs, targets) in enumerate(tqdm_loader):
-            with torch.no_grad():
-                inputs, targets = self.to_device(inputs), targets.to(self.device)
-                preds, loss = self.valid_batch(inputs, targets)
+        with torch.no_grad():
+            for batch_idx, (inputs, targets) in enumerate(tqdm_loader):
+                with torch.no_grad():
+                    inputs, targets = self.to_device(inputs), targets.to(self.device)
+                    preds, loss = self.valid_batch(inputs, targets)
 
-                self.valid_preds.append(to_cpu(preds))
-                self.valid_targets.append(to_cpu(targets))
+                    self.valid_preds.append(to_cpu(preds))
+                    self.valid_targets.append(to_cpu(targets))
 
-                curr_loss_avg, curr_metric_avgs = self._update_metrics(
-                    curr_loss_avg, loss, curr_metric_avgs, preds, targets, 
-                    batch_idx, train=False
-                )
-                if self.batch_update_score_as_loss: score = curr_loss_avg
-                else: score = curr_metric_avgs[self.monitor_metric]
-                
-                tqdm_loader.set_description(
-                    'score: {:.4}'.format(round(score, 4)))
+                    curr_loss_avg, curr_metric_avgs = self._update_metrics(
+                        curr_loss_avg, loss, curr_metric_avgs, preds, targets, 
+                        batch_idx, train=False
+                    )
+                    if self.batch_update_score_as_loss: score = curr_loss_avg
+                    else: score = curr_metric_avgs[self.monitor_metric]
+                    
+                    tqdm_loader.set_description(
+                        'score: {:.4}'.format(round(score, 4)))
 
         for k, (metric_fn, update_type) in self.metric_fns.items():
             if update_type == 'epoch_end':
@@ -315,9 +316,10 @@ class Learner():
     def _update_batch_norm(self):
         # run one forward pass of train data to update batch norm running stats
         self.swa_model.train()
-        for inputs, _ in tqdm(self.train_loader):
-            inputs = self.to_device(inputs)
-            self.swa_model(inputs)
+        with torch.no_grad():
+            for inputs, _ in tqdm(self.train_loader):
+                inputs = self.to_device(inputs)
+                self.swa_model(inputs)
         self.swa_model.eval()
 
     def plot_losses(self, smooth=True):

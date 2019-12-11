@@ -31,10 +31,11 @@ def infer(model, loader, checkpoint_file=None, device=torch.device('cuda')):
     model.to(device)
     model.eval()
 
-    for i, (inputs, _) in enumerate(tqdm(loader)):
-        start_index = i * batch_sz
-        end_index = min(start_index + batch_sz, n_obs)
-        batch_preds = infer_batch(inputs, model, device)
-        predictions[start_index:end_index, :] += batch_preds
+    with torch.no_grad():
+        for i, (inputs, _) in enumerate(tqdm(loader)):
+            start_index = i * batch_sz
+            end_index = min(start_index + batch_sz, n_obs)
+            batch_preds = infer_batch(inputs, model, device)
+            predictions[start_index:end_index, :] += batch_preds
 
     return predictions
