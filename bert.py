@@ -4,7 +4,7 @@ import copy
 import torch
 import torch.nn as nn
 
-from transformers import DistilBertModel
+from transformers import DistilBertModel, BertModel
 
 from net import GELU
 from common import *
@@ -330,3 +330,30 @@ class CustomBert2(nn.Module):
         x_q_bert = self.q_bert(q_ids, attention_mask=q_att_mask)[0][:, 0, :]
         x_a_bert = self.a_bert(a_ids, attention_mask=a_att_mask)[0][:, 0, :]
         return self.head(x_feats, x_q_bert, x_a_bert)
+
+
+def first_nonzero(x, axis=0):
+    nonz = (x > 0)
+    return ((nonz.cumsum(axis) == 1) & nonz).max(axis).indices
+
+
+
+class CustomBert4(nn.Module):
+    n_h_bert = 768
+    def __init__(self, n_h, n_cats):
+        super().__init__()
+        self.bert = BertModel.from_pretrained('bert-base-uncased')
+        self.head = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(self.n_h_bert+n_cats, N_TARGETS)
+        )
+        self.head = HeadNet2(n_h, n_cats)
+
+    def forward(self, x_cats, ids, seg_ids):
+        att_mask = ids > 0
+        x_bert = self.bert(ids, att_mask, seg_ids)[0]
+        # x_bert = x_bert.mean(dim=1)
+        # return self.head(torch.cat([x_bert, x_cats], dim=1))
+        x_bert_q = (x_bert * (seg_ids.unsqueeze(-1) == 0)).mean(dim=1)
+        x_bert_a = (x_bert * seg_ids.unsqueeze(-1)).mean(dim=1)
+        return self.head(x_cats, x_bert_q, x_bert_a)
