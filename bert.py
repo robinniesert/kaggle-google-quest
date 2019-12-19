@@ -148,7 +148,7 @@ class FFN(nn.Module):
 
 class MyTransformerBlock(nn.Module):
     """Down samples sequence length"""
-    def __init__(self, dim, hidden_dim, dropout, n_heads, down_sample=32):
+    def __init__(self, dim, hidden_dim, dropout, n_heads, down_sample=1):
         super().__init__()
 
         self.n_heads = n_heads
@@ -190,7 +190,7 @@ class MyTransformerBlock(nn.Module):
 
 
 class MyTransformer(nn.Module):
-    def __init__(self, n_layers, dim, hidden_dim, dropout, n_heads, down_sample=32):
+    def __init__(self, n_layers, dim, hidden_dim, dropout, n_heads, down_sample=1):
         super().__init__()
         self.n_layers = n_layers
 
@@ -218,66 +218,6 @@ class MyTransformer(nn.Module):
 
         outputs = hidden_state
         return outputs  # last-layer hidden state
-
-
-class Head3(nn.Module):
-    def __init__(self, n_h=512, n_feats=74, n_bert=768):
-        super().__init__()
-        self.lin = nn.Sequential(
-            nn.Linear(n_feats + n_bert, n_h),
-            GELU(),
-            # nn.LayerNorm(n_h),
-            nn.Dropout(0.2),
-        )
-        self.lin_q = nn.Sequential(
-            nn.Linear(n_feats + n_bert, n_h),
-            GELU(),
-            # nn.LayerNorm(n_h),
-            nn.Dropout(0.2),
-        )
-        self.lin_a = nn.Sequential(
-            nn.Linear(n_feats + n_bert, n_h),
-            GELU(),
-            # nn.LayerNorm(n_h),
-            nn.Dropout(0.2)
-        )
-        self.head_q = nn.Linear(2 * n_h, N_Q_TARGETS)
-        self.head_a = nn.Linear(2 * n_h, N_A_TARGETS)
-        
-    def forward(self, x):
-        x_q = self.lin_q(torch.cat([x[0], x[1]], dim=1))
-        x_a = self.lin_a(torch.cat([x[0], x[2]], dim=1))
-        x = self.lin(torch.cat([x[0], x[3]], dim=1))
-        x_q = self.head_q(torch.cat([x, x_q], dim=1))
-        x_a = self.head_a(torch.cat([x, x_a], dim=1))
-        return torch.cat([x_q, x_a], dim=1)
-
-
-class HeadNet3(nn.Module):
-    def __init__(self, n_h=256, n_feats=74, n_bert=768):
-        super().__init__()
-        self.transformer = MyTransformer(2, n_bert, 4 * n_bert, dropout=0.1, n_heads=12, down_sample=32)
-        self.head = Head3(n_h, n_feats, n_bert)
-        
-    def forward(self, x_feats, x_q_bert, x_a_bert):
-        x = self.transformer(torch.cat([x_q_bert, x_a_bert], dim=1))
-        return self.head((x_feats, x_q_bert[:, 0, :], x_a_bert[:, 0, :], x[:, 0, :]))
-
-
-class CustomBert3(nn.Module):
-    def __init__(self, n_h, n_feats):
-        super().__init__()
-        self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.head = HeadNet3(n_h, n_feats)
-    
-    def forward(self, x_feats, q_ids, a_ids):
-        q_att_mask = q_ids > 0
-        a_att_mask = a_ids > 0
-        x_q_bert = self.q_bert(q_ids, attention_mask=q_att_mask)[0]
-        x_a_bert = self.a_bert(a_ids, attention_mask=a_att_mask)[0]
-        return self.head(x_feats, x_q_bert, x_a_bert)
-   
 
 class Head2(nn.Module):
     def __init__(self, n_h=512, n_feats=74, n_bert=768):
@@ -338,16 +278,105 @@ def first_nonzero(x, axis=0):
 
 
 
+class HeadNet4(nn.Module):
+    def __init__(self, n_h_bert, n_cats):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(n_h_bert+n_cats, N_TARGETS)
+        )
+        self.q_head = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(n_h_bert+n_cats, N_Q_TARGETS)
+        )
+        self.a_head = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(n_h_bert+n_cats, N_A_TARGETS)
+        )
+
+    def forward(self, x_cats, x_bert, x_q_bert, x_a_bert):
+        y = self.head(torch.cat([x_bert, x_cats], dim=1))
+        y_q = self.q_head(torch.cat([x_q_bert, x_cats], dim=1))
+        y_a = self.a_head(torch.cat([x_a_bert, x_cats], dim=1))
+        return (y + torch.cat([y_q, y_a], dim=1)) / 2
+
+
+
+
+class Head3(nn.Module):
+    def __init__(self, n_h=512, n_feats=74, n_bert=768):
+        super().__init__()
+        self.lin = nn.Sequential(
+            nn.Linear(n_feats + n_bert, n_h),
+            GELU(),
+            # nn.LayerNorm(n_h),
+            nn.Dropout(0.2),
+        )
+        self.lin_q = nn.Sequential(
+            nn.Linear(n_feats + n_bert, n_h),
+            GELU(),
+            # nn.LayerNorm(n_h),
+            nn.Dropout(0.2),
+        )
+        self.lin_a = nn.Sequential(
+            nn.Linear(n_feats + n_bert, n_h),
+            GELU(),
+            # nn.LayerNorm(n_h),
+            nn.Dropout(0.2)
+        )
+        self.head_q = nn.Linear(2 * n_h, N_Q_TARGETS)
+        self.head_a = nn.Linear(2 * n_h, N_A_TARGETS)
+        
+    def forward(self, x):
+        x_q = self.lin_q(torch.cat([x[0], x[1]], dim=1))
+        x_a = self.lin_a(torch.cat([x[0], x[2]], dim=1))
+        x = self.lin(torch.cat([x[0], x[3]], dim=1))
+        x_q = self.head_q(torch.cat([x, x_q], dim=1))
+        x_a = self.head_a(torch.cat([x, x_a], dim=1))
+        return torch.cat([x_q, x_a], dim=1)
+
+
+class HeadNet3(nn.Module):
+    def __init__(self, n_h=256, n_feats=74, n_h_bert=768):
+        super().__init__()
+        self.transformer = MyTransformer(
+            1, n_h_bert, 4 * n_h_bert, dropout=0.1, n_heads=12)
+        self.head = Head3(n_h, n_feats, n_h_bert)
+        
+    def forward(self, x_feats, x_q_bert, x_a_bert, att_mask):
+        x = self.transformer(torch.cat([x_q_bert, x_a_bert], dim=1), att_mask)
+        return self.head((x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1), x.mean(dim=1)))
+
+
+class CustomBert3(nn.Module):
+    def __init__(self, n_h, n_feats):
+        super().__init__()
+        self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.head = HeadNet2(n_h, n_feats)#HeadNet3(n_h, n_feats)
+    
+    def forward(self, x_feats, q_ids, a_ids):
+        q_att_mask = q_ids > 0
+        a_att_mask = a_ids > 0
+        x_q_bert = self.q_bert(q_ids, attention_mask=q_att_mask)[0]
+        x_a_bert = self.a_bert(a_ids, attention_mask=a_att_mask)[0]
+        return self.head(x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1))
+        # att_mask = torch.cat([q_att_mask, a_att_mask], dim=1)
+        # return self.head(x_feats, x_q_bert, x_a_bert, att_mask)
+   
+
+
 class CustomBert4(nn.Module):
     n_h_bert = 768
     def __init__(self, n_h, n_cats):
         super().__init__()
         self.bert = BertModel.from_pretrained('bert-base-uncased')
-        self.head = nn.Sequential(
-            nn.Dropout(0.2),
-            nn.Linear(self.n_h_bert+n_cats, N_TARGETS)
-        )
+        # self.head = nn.Sequential(
+        #     nn.Dropout(0.2),
+        #     nn.Linear(self.n_h_bert+n_cats, N_TARGETS)
+        # )
         self.head = HeadNet2(n_h, n_cats)
+        # self.head = HeadNet4(self.n_h_bert, n_cats)
 
     def forward(self, x_cats, ids, seg_ids):
         att_mask = ids > 0
@@ -357,3 +386,5 @@ class CustomBert4(nn.Module):
         x_bert_q = (x_bert * (seg_ids.unsqueeze(-1) == 0)).mean(dim=1)
         x_bert_a = (x_bert * seg_ids.unsqueeze(-1)).mean(dim=1)
         return self.head(x_cats, x_bert_q, x_bert_a)
+        # x_bert = x_bert.mean(dim=1)
+        # return self.head(x_cats, x_bert, x_bert_q, x_bert_a)
