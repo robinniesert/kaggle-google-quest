@@ -1,8 +1,51 @@
 import torch
 import torch.nn as nn
 
-from common import N_TARGETS
+from common import N_TARGETS, N_Q_TARGETS, N_A_TARGETS
 
+    
+class GELU(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(1.702 * x)
+
+
+class AttFFN(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout=0.1):
+        super().__init__()
+        self.ln = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(p=dropout)
+        self.lin1 = nn.Linear(in_features=dim, out_features=hidden_dim)
+        self.lin2 = nn.Linear(in_features=hidden_dim, out_features=1)
+        self.activation = GELU()
+
+    def forward(self, input):
+        x = self.lin1(input)
+        x = self.activation(x)
+        x = self.ln(x)
+        x = self.dropout(x)
+        x = self.lin2(x)
+        return x
+
+
+class Attention2(nn.Module):
+    def __init__(self, feature_dim, step_dim, bias=True):
+        super().__init__()
+        self.bias = bias
+        self.feature_dim = feature_dim
+        self.step_dim = step_dim
+        self.features_dim = 0
+        self.ffn = AttFFN(feature_dim, 4*feature_dim)
+        if bias: self.b = nn.Parameter(torch.zeros(step_dim))
+
+    def forward(self, x, mask=None):
+        eij = self.ffn(x).view(-1, self.step_dim)
+        if self.bias: eij = eij + self.b
+        eij = torch.tanh(eij)
+        a = torch.exp(eij)
+        if mask is not None: a = a * mask
+        a = a / torch.sum(a, 1, keepdim=True) + 1e-10
+        weighted_input = x * torch.unsqueeze(a, -1)
+        return weighted_input.sum(dim=1)
 
 class Attention(nn.Module):
     def __init__(self, feature_dim, step_dim, bias=True, **kwargs):
@@ -44,11 +87,6 @@ class Attention(nn.Module):
 
         weighted_input = x * torch.unsqueeze(a, -1)
         return torch.sum(weighted_input, 1)
-
-    
-class GELU(nn.Module):
-    def forward(self, x):
-        return x * torch.sigmoid(1.702 * x)
 
 
 class SpatialDropout(nn.Dropout2d):

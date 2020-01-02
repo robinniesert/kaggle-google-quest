@@ -1,13 +1,16 @@
 import math
 import copy
+import gc
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.nn.utils.rnn as rnn
 
 from transformers import DistilBertModel, BertModel
 from transformers.modeling_distilbert import MultiHeadSelfAttention
 
-from net import GELU
+from net import GELU, Attention, Attention2
 from common import *
 
 
@@ -64,7 +67,7 @@ class CustomBert(nn.Module):
         return self.head(x_feats, x_q_emb, x_t_emb, x_a_emb, x_q_bert, x_a_bert)
 
 
-class MultiHeadSelfAttention(nn.Module):
+class MyMultiHeadSelfAttention(nn.Module):
     def __init__(self, dim, n_heads, attention_dropout):
         super().__init__()
         self.n_heads = n_heads
@@ -76,7 +79,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.v_lin = nn.Linear(in_features=dim, out_features=dim)
         self.out_lin = nn.Linear(in_features=dim, out_features=dim)
 
-    def forward(self, query, key, value, mask, head_mask = None):
+    def forward(self, query, key, value, mask, query_mask=None):
         bs, q_length, dim = query.size()
         k_length = key.size(1)
         dim_per_head = self.dim // self.n_heads
@@ -90,7 +93,10 @@ class MultiHeadSelfAttention(nn.Module):
             """ group heads """
             return x.transpose(1, 2).contiguous().view(bs, -1, self.n_heads * dim_per_head)
 
-        q = shape(self.q_lin(query))           # (bs, n_heads, q_length, dim_per_head)
+        if query_mask is None: query_mask = torch.ones_like(query)
+        else: query_mask = query_mask.unsqueeze(-1)
+
+        q = shape(self.q_lin(query) * query_mask)           # (bs, n_heads, q_length, dim_per_head)
         k = shape(self.k_lin(key))             # (bs, n_heads, k_length, dim_per_head)
         v = shape(self.v_lin(value))           # (bs, n_heads, k_length, dim_per_head)
 
@@ -102,10 +108,6 @@ class MultiHeadSelfAttention(nn.Module):
         weights = nn.Softmax(dim=-1)(scores)   # (bs, n_heads, q_length, k_length)
         weights = self.dropout(weights)        # (bs, n_heads, q_length, k_length)
 
-        # Mask heads if we want to
-        if head_mask is not None:
-            weights = weights * head_mask
-
         context = torch.matmul(weights, v)     # (bs, n_heads, q_length, dim_per_head)
         context = unshape(context)             # (bs, q_length, dim)
         context = self.out_lin(context)        # (bs, q_length, dim)
@@ -113,7 +115,7 @@ class MultiHeadSelfAttention(nn.Module):
         return context
 
 
-class FFN(nn.Module):
+class MyFFN(nn.Module):
     def __init__(self, dim, hidden_dim, dropout=0.1):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
@@ -140,17 +142,17 @@ class MyTransformerBlock(nn.Module):
 
         assert dim % n_heads == 0
 
-        self.self_attention = MultiHeadSelfAttention(dim, n_heads, dropout)
+        self.self_attention = MyMultiHeadSelfAttention(dim, n_heads, dropout)
         self.sa_layer_norm = nn.LayerNorm(normalized_shape=dim, eps=1e-12)
 
         if other_attention:
-            self.other_attention = MultiHeadSelfAttention(dim, n_heads, dropout)
+            self.other_attention = MyMultiHeadSelfAttention(dim, n_heads, dropout)
             self.oa_layer_norm = nn.LayerNorm(normalized_shape=dim, eps=1e-12)
         else:
             self.other_attention = None
             self.oa_layer_norm = None
 
-        self.ffn = FFN(dim, hidden_dim, dropout)
+        self.ffn = MyFFN(dim, hidden_dim, dropout)
         self.output_layer_norm = nn.LayerNorm(normalized_shape=dim, eps=1e-12)
 
     def forward(self, x, x_other=None, attn_mask=None):
@@ -172,18 +174,16 @@ class MyTransformerBlock(nn.Module):
 
 
 class MyTransformer(nn.Module):
-    def __init__(self, n_layers, dim, hidden_dim, dropout, n_heads, other_attention=False):
+    def __init__(self, n_layers, dim, hidden_dim, dropout, n_heads):
         super().__init__()
         self.n_layers = n_layers
-        layer = MyTransformerBlock(dim, hidden_dim, dropout, n_heads, other_attention)
+        layer = MyTransformerBlock(dim, hidden_dim, dropout, n_heads)
         self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(n_layers)])
 
     def forward(self, x, attn_mask=None):
-        hidden_state = x
         for layer_module in self.layers:
-            layer_outputs = layer_module(x=hidden_state, attn_mask=attn_mask)
-            hidden_state = layer_outputs
-        return hidden_state
+            x = layer_module(x=x, attn_mask=attn_mask)
+        return x
 
 
 class Head2(nn.Module):
@@ -193,19 +193,16 @@ class Head2(nn.Module):
         self.lin = nn.Sequential(
             nn.Linear(n_x, n_h),
             GELU(),
-            # nn.LayerNorm(n_h),
             nn.Dropout(0.2),
         )
         self.lin_q = nn.Sequential(
             nn.Linear(n_feats + n_bert, n_h),
             GELU(),
-            # nn.LayerNorm(n_h),
             nn.Dropout(0.2),
         )
         self.lin_a = nn.Sequential(
             nn.Linear(n_feats + n_bert, n_h),
             GELU(),
-            # nn.LayerNorm(n_h),
             nn.Dropout(0.2)
         )
         self.head_q = nn.Linear(2 * n_h, N_Q_TARGETS)
@@ -313,44 +310,65 @@ class CustomBert3(nn.Module):
         super().__init__()
         self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
         self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.head = HeadNet2(n_h, n_feats)#HeadNet3(n_h, n_feats)
+        self.head = HeadNet2(n_h, n_feats, n_bert=768)
     
     def forward(self, x_feats, q_ids, a_ids):
         q_att_mask = q_ids > 0
         a_att_mask = a_ids > 0
         x_q_bert = self.q_bert(q_ids, attention_mask=q_att_mask)[0]
         x_a_bert = self.a_bert(a_ids, attention_mask=a_att_mask)[0]
-        return self.head(x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1))
-        # att_mask = torch.cat([q_att_mask, a_att_mask], dim=1)
-        # return self.head(x_feats, x_q_bert, x_a_bert, att_mask)
+        q_att_mask = q_att_mask.unsqueeze(-1)
+        a_att_mask = a_att_mask.unsqueeze(-1)
+        x_q_bert = (x_q_bert * q_att_mask).sum(dim=1) / q_att_mask.sum(dim=1)
+        x_a_bert = (x_a_bert * a_att_mask).sum(dim=1) / a_att_mask.sum(dim=1)
+        return self.head(x_feats, x_q_bert, x_a_bert)
+
+
+class CustomBert3b(nn.Module):
+    def __init__(self, n_h, n_feats):
+        super().__init__()
+        n_bert = 768
+        self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.transformer = MyTransformer(1, n_bert, 4*n_bert, dropout=0.1, n_heads=12)
+        self.head = HeadNet2(n_h, n_feats, n_bert=n_bert)
+    
+    def forward(self, x_feats, q_ids, a_ids):
+        q_att_mask = q_ids > 0
+        a_att_mask = a_ids > 0
+        x_q_bert = self.q_bert(q_ids, attention_mask=q_att_mask)[0]
+        x_a_bert = self.a_bert(a_ids, attention_mask=a_att_mask)[0]
+        x_bert = torch.cat([x_q_bert, x_a_bert], dim=1)
+        att_mask = torch.cat([q_att_mask, a_att_mask], dim=1)
+        x_bert = self.transformer(x_bert, att_mask)
+        x_q_bert = x_bert[:, :512]
+        x_a_bert = x_bert[:, 512:]
+        q_att_mask = q_att_mask.unsqueeze(-1)
+        a_att_mask = a_att_mask.unsqueeze(-1)
+        x_q_bert = (x_q_bert * q_att_mask).sum(dim=1) / q_att_mask.sum(dim=1)
+        x_a_bert = (x_a_bert * a_att_mask).sum(dim=1) / a_att_mask.sum(dim=1)
+        return self.head(x_feats, x_q_bert, x_a_bert)
    
 
 class CustomBert4(nn.Module):
-    n_h_bert = 768
-    def __init__(self, n_h, n_cats):
+    def __init__(self, n_h, n_cats, bert_type='large'):
         super().__init__()
-        self.bert = BertModel.from_pretrained('bert-base-uncased')
-        # self.head = nn.Sequential(
-        #     nn.Dropout(0.2),
-        #     nn.Linear(self.n_h_bert+n_cats, N_TARGETS)
-        # )
-        self.head = HeadNet2(n_h, n_cats)
-        # self.head = HeadNet4(self.n_h_bert, n_cats)
+        self.bert = BertModel.from_pretrained(f'bert-{bert_type}-uncased')
+        n_bert = 1024 if bert_type=='large' else 768
+        self.head = HeadNet2(n_h, n_cats, n_bert)
 
     def forward(self, x_cats, ids, seg_ids):
         att_mask = ids > 0
         x_bert = self.bert(ids, att_mask, seg_ids)[0]
-        # x_bert = x_bert.mean(dim=1)
-        # return self.head(torch.cat([x_bert, x_cats], dim=1))
-        x_bert_q = (x_bert * (seg_ids.unsqueeze(-1) == 0)).mean(dim=1)
-        x_bert_a = (x_bert * seg_ids.unsqueeze(-1)).mean(dim=1)
-        return self.head(x_cats, x_bert_q, x_bert_a)
-        # x_bert = x_bert.mean(dim=1)
-        # return self.head(x_cats, x_bert, x_bert_q, x_bert_a)
+        seg_ids_q = (seg_ids.unsqueeze(-1) <= 1) * att_mask.unsqueeze(-1)
+        seg_ids_a = (seg_ids.unsqueeze(-1) == 2) * att_mask.unsqueeze(-1)
+        x_q_bert = (x_bert * seg_ids_q).sum(dim=1) / seg_ids_q.sum(dim=1)
+        x_a_bert = (x_bert * seg_ids_a).sum(dim=1) / seg_ids_a.sum(dim=1)
+        return self.head(x_cats, x_q_bert, x_a_bert)
 
 
 def self_attent(transformer_block, x, attn_mask):
-    out = transformer_block.attention(query=x, key=x, value=x, mask=attn_mask)
+    out = transformer_block.attention(query=x, key=x, value=x, mask=attn_mask)[0]
     x = transformer_block.sa_layer_norm(out + x)
     return x
 
@@ -362,40 +380,58 @@ def apply_ffn(transformer_block, x):
 
 
 class NeighborAttention(nn.Module):
-    def __init__(self, dim, dropout, n_heads):
+    def __init__(self, dim, n_heads, dropout):
         super().__init__()
-        self.attention = MultiHeadSelfAttention(dim, n_heads, dropout)
+        self.attention = MyMultiHeadSelfAttention(dim, n_heads, dropout)
         self.layer_norm = nn.LayerNorm(normalized_shape=dim, eps=1e-12)
+        self.apply(self._init_weights)
 
-    def forward(self, x, x_neighbor, attn_mask):
-        out = self.attention(query=x_neighbor, key=x, value=x, mask=attn_mask)
+    def _init_weights(self, module):
+        if isinstance(module, nn.Embedding):
+            if module.weight.requires_grad:
+                module.weight.data.normal_(mean=0.0, std=0.02)
+        if isinstance(module, nn.Linear):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        if isinstance(module, nn.Linear) and module.bias is not None:
+            module.bias.data.zero_()
+
+    def forward(self, x, x_neighbor, mask, neighbor_mask):
+        neighbor_mask = neighbor_mask.unsqueeze(-1)
+        x_neighbor = (x_neighbor * neighbor_mask).sum(dim=1) / neighbor_mask.sum(dim=1)
+        x_neighbor = x_neighbor.unsqueeze(1).expand_as(x)
+        out = self.attention(query=x_neighbor, key=x, value=x, mask=mask)
         x = self.layer_norm(out + x) 
         return x
 
 
 class ParallelTransformer(nn.Module):
-    def __init__(self, transformer1, transformer2):
+    def __init__(self, transformer1, transformer2, neighbor_layers=[0, 1, 2, 3, 4, 5]):
         super().__init__()
         self.layer1 = transformer1.layer
         self.layer2 = transformer2.layer
-        dim, dropout, n_heads = self.layer1[0].dim, 0.1, self.layer1[0].n_heads
+        self.neighbor_layers = neighbor_layers
+        dim, n_heads, dropout = self.layer1[0].dim, self.layer1[0].n_heads, 0.1
         neigbor_attention = NeighborAttention(dim, n_heads, dropout)
         self.neighbor_attentions1 = nn.ModuleList(
-            [copy.deepcopy(neigbor_attention) for _ in range(len(self.layer1))])
+            [copy.deepcopy(neigbor_attention) for _ in range(len(neighbor_layers))])
         self.neighbor_attentions2 = nn.ModuleList(
-            [copy.deepcopy(neigbor_attention) for _ in range(len(self.layer2))])
+            [copy.deepcopy(neigbor_attention) for _ in range(len(neighbor_layers))])
 
     def forward(self, x1, x2, attn_mask1, attn_mask2):
 
-        for block1, block2, neighbor_attn1, neighbor_attn2 in zip(
-            self.layer1, self.layer2, self.neighbor_attentions1, self.neighbor_attentions2):
+        for i, (block1, block2) in enumerate(zip(self.layer1, self.layer2)):
 
-            out1 = self_attent(self.block1, x1, attn_mask1)
-            out2 = self_attent(self.block2, x2, attn_mask2)
-            x1 = neighbor_attn1(out1, out2, attn_mask1)
-            x2 = neighbor_attn2(out2, out1, attn_mask2)
-            x1 = apply_ffn(self.block1, x1)
-            x2 = apply_ffn(self.block2, x2)
+            out1 = self_attent(block1, x1, attn_mask1)
+            out2 = self_attent(block2, x2, attn_mask2)
+            if i in self.neighbor_layers:
+                idx = self.neighbor_layers.index(i)
+                x1 = self.neighbor_attentions1[idx](out1, out2, attn_mask1, attn_mask2)
+                x2 = self.neighbor_attentions2[idx](out2, out1, attn_mask2, attn_mask1)
+            x1 = apply_ffn(block1, x1)
+            x2 = apply_ffn(block2, x2)
 
         return x1, x2
 
@@ -405,7 +441,7 @@ class ParallelDistillBert(nn.Module):
         super().__init__()
         self.bert1 = DistilBertModel.from_pretrained('distilbert-base-uncased')
         self.bert2 = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.tansformer = ParallelTransformer(self.bert1.transformer, self.bert2.transformer)
+        self.transformer = ParallelTransformer(self.bert1.transformer, self.bert2.transformer, [0,1,2,3,4,5])
 
     def forward(self, inp_ids1, inp_ids2, attn_mask1, attn_mask2):
         x1 = self.bert1.embeddings(inp_ids1) 
@@ -424,4 +460,87 @@ class CustomBert5(nn.Module):
         q_att_mask = q_ids > 0
         a_att_mask = a_ids > 0
         x_q_bert, x_a_bert = self.parallel_bert(q_ids, a_ids, q_att_mask, a_att_mask)
-        return self.head(x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1))
+        q_att_mask = q_att_mask.unsqueeze(-1)
+        a_att_mask = a_att_mask.unsqueeze(-1)
+        x_q_bert = (x_q_bert * q_att_mask).sum(dim=1) / q_att_mask.sum(dim=1)
+        x_a_bert = (x_a_bert * a_att_mask).sum(dim=1) / a_att_mask.sum(dim=1)
+        return self.head(x_feats, x_q_bert, x_a_bert)
+
+
+max_seq_length = 512
+max_q_length = 271
+max_a_length = 241
+
+def concat_q_and_a(q_x, a_x, q_mask, a_mask):
+    d = q_x.device
+    seqs = []
+    new_masks = []
+    new_q_masks = []
+    new_a_masks = []
+    for q, a, q_m, a_m in zip(q_x, a_x, q_mask, a_mask):
+        n_q, n_a = q_m.sum(), a_m.sum()
+        cut_off = n_q + n_a - max_seq_length
+        if cut_off > 0:
+            if n_q > max_q_length: n_q = max(max_q_length, n_q - cut_off)
+            if n_a > max_a_length: n_a = max(max_a_length, n_a - cut_off)
+
+        seqs.append(torch.cat([q[q_m==1][:n_q], a[a_m==1][:n_a]], dim=0))
+        new_masks.append(torch.ones(n_q + n_a, device=d))
+        new_q_masks.append(torch.ones(n_q, device=d))
+        new_a_masks.append(torch.cat([torch.zeros(n_q, device=d), torch.ones(n_a, device=d)]))
+
+    packed_seq = rnn.pack_sequence(seqs, enforce_sorted=False)
+    packed_masks = rnn.pack_sequence(new_masks, enforce_sorted=False)
+    packed_q_masks = rnn.pack_sequence(new_q_masks, enforce_sorted=False)
+    packed_a_masks = rnn.pack_sequence(new_a_masks, enforce_sorted=False)
+    padded_seq = rnn.pad_packed_sequence(packed_seq, batch_first=True, total_length=max_seq_length)[0]
+    padded_masks = rnn.pad_packed_sequence(packed_masks, batch_first=True, total_length=max_seq_length)[0]
+    padded_q_masks = rnn.pad_packed_sequence(packed_q_masks, batch_first=True, total_length=max_seq_length)[0]
+    padded_a_masks = rnn.pad_packed_sequence(packed_a_masks, batch_first=True, total_length=max_seq_length)[0]
+
+    return padded_seq, padded_masks.long(), padded_q_masks.unsqueeze(-1), padded_a_masks.unsqueeze(-1)
+
+
+class CustomBert6(nn.Module):
+    def __init__(self, n_h, n_feats):
+        super().__init__()
+        q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+
+        self.q_emb = copy.deepcopy(q_bert.embeddings)
+        self.a_emb = copy.deepcopy(a_bert.embeddings)
+
+        self.q_transformer = copy.deepcopy(q_bert.transformer.layer[:3])
+        self.a_transformer = copy.deepcopy(a_bert.transformer.layer[:3])
+        self.transformer = copy.deepcopy(bert.transformer.layer[3:])
+
+        del q_bert, a_bert, bert
+        gc.collect()
+
+        self.head = HeadNet2(n_h, n_feats)#HeadNet3(n_h, n_feats)
+    
+    def forward(self, x_feats, q_ids, a_ids):
+        q_att_mask = q_ids > 0
+        a_att_mask = a_ids > 0
+        
+        q_x = self.q_emb(q_ids) 
+        a_x = self.a_emb(a_ids)
+
+        for i, (q_block, a_block) in enumerate(zip(self.q_transformer, self.a_transformer)):
+            q_x = self_attent(q_block, q_x, q_att_mask)
+            a_x = self_attent(a_block, a_x, a_att_mask)
+            q_x = apply_ffn(q_block, q_x)
+            a_x = apply_ffn(a_block, a_x)
+
+        x, att_mask, q_att_mask, a_att_mask = concat_q_and_a(q_x, a_x, q_att_mask, a_att_mask)
+
+        for i, block in enumerate(self.transformer):
+            x = self_attent(block, x, att_mask)
+            x = apply_ffn(block, x)
+
+        x_q = (x * q_att_mask).sum(dim=1) / q_att_mask.sum(dim=1)
+        x_a = (x * a_att_mask).sum(dim=1) / a_att_mask.sum(dim=1)
+        return self.head(x_feats, x_q, x_a)
+
+

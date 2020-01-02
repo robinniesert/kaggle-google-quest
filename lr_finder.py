@@ -2,7 +2,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from tqdm import tqdm
+from tqdm import tqdm_notebook as tqdm
 
 import torch
 from torch.utils.data import DataLoader
