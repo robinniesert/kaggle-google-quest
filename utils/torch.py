@@ -9,10 +9,13 @@ def to_numpy(x):
     return to_cpu(x).numpy()
 
 
-def to_device(xs, device):
+def to_device(xs, device, no_wrap_for_singles=False):
     if isinstance(xs, tuple) or isinstance(xs, list):
-        return [x.to(device) for x in xs]
-    else: return [xs.to(device)]
+        print('hi')
+        return [to_device(x, device, no_wrap_for_singles=True) for x in xs]
+    else: 
+        if no_wrap_for_singles: return xs.to(device)
+        else: return [xs.to(device)]
 
 
 def set_optimizer_mom(opt, mom):

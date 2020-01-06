@@ -544,3 +544,51 @@ class CustomBert6(nn.Module):
         return self.head(x_feats, x_q, x_a)
 
 
+def apply_bert(x_ids, bert):
+    att_mask = x_ids
+    x_bert = bert(x_ids, attention_mask=att_mask)[0]
+    att_mask = att_mask.unsqueeze(-1)
+    return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
+
+
+def convert_listy(l):
+    if isinstance(l, list) or isinstance(l, tuple):
+        return l[0]
+
+
+class CustomBert7(nn.Module):
+    def __init__(self, n_h, n_feats, n_bert=768):
+        super().__init__()
+        self.n_bert = n_bert
+        self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.head = HeadNet2(n_h, n_feats, n_bert=n_bert)
+    
+    def forward(self, x_feats, q_ids, a_ids, n_q_seqs, n_a_seqs):
+        bs = x_feats.size(0)
+        q_ids = convert_listy(q_ids)
+        a_ids = convert_listy(a_ids)
+        x_q_bert = torch.zeros((bs, self.n_bert), dtype=torch.float, device=x_feats.device)
+        x_a_bert = torch.zeros((bs, self.n_bert), dtype=torch.float, device=x_feats.device)
+        n_q_seqs_exp = torch.cat([n.repeat(n) for n in n_q_seqs])
+        n_a_seqs_exp = torch.cat([n.repeat(n) for n in n_a_seqs])
+        
+        one_q_idx = n_q_seqs == 1
+        one_a_idx = n_a_seqs == 1
+        one_q_idx_exp = n_q_seqs_exp == 1
+        one_a_idx_exp = n_a_seqs_exp == 1
+
+        q_idxs = torch.arange(bs)
+        a_idxs = torch.arange(bs)
+        q_idxs_exp = torch.cat([torch.full((n,), i)  for i, n in enumerate(n_q_seqs)])
+        a_idxs_exp = torch.cat([torch.full((n,), i)  for i, n in enumerate(n_a_seqs)])
+        
+        x_q_bert[one_q_idx] = apply_bert(q_ids[one_q_idx_exp], self.q_bert)
+        x_a_bert[one_a_idx] = apply_bert(a_ids[one_a_idx_exp], self.a_bert)
+        
+        for q_idx in q_idxs[~one_q_idx]:
+            x_q_bert[q_idx] = apply_bert(q_ids[q_idxs_exp==q_idx], self.q_bert).mean(dim=0)
+        for a_idx in a_idxs[~one_a_idx]:
+            x_a_bert[a_idx] = apply_bert(a_ids[a_idxs_exp==a_idx], self.a_bert).mean(dim=0)
+
+        return self.head(x_feats, x_q_bert, x_a_bert)
