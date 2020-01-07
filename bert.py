@@ -567,9 +567,9 @@ def apply_bert_batch(ids, n_seqs, n_bert, bert, seq_add):
     for idx in idxs[~one_idx]:
         for i, id in enumerate(ids[idxs_exp==idx]):
             if i == 0:
-                x_bert[idx] = apply_bert(id.view(1, -1), bert)
+                x_bert[idx] = apply_bert(id.view(1, -1), bert).squeeze() / n_seqs[idx].float()
             else:
-                x_bert[idx] = seq_add(x_bert[idx], apply_bert(id.view(1, -1), bert))
+                x_bert[idx] += apply_bert(id.view(1, -1), bert).squeeze() / n_seqs[idx].float()
                 #torch.cat((x_bert[idx].view(1,-1), apply_bert(id.view(1, -1), bert))).max(dim=0).values # / n_seqs[idx].float()
         
     return x_bert
@@ -580,10 +580,10 @@ class AddSeq(nn.Module):
         super().__init__()
         self.lin = nn.Linear(n_h, n_h)
         self.ln = nn.LayerNorm(n_h)
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
     def forward(self, x1, x2):
-        return self.ln(x1 + x2)
+        return x1 + x2
 
     def _init_weights(self, module):
         """ Initialize the weights """
