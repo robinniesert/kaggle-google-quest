@@ -551,44 +551,64 @@ def apply_bert(x_ids, bert):
     return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
 
 
-def convert_listy(l):
-    if isinstance(l, list) or isinstance(l, tuple):
-        return l[0]
+def apply_bert_batch(ids, n_seqs, n_bert, bert, seq_add):
+    bs = n_seqs.size(0)
+    x_bert = torch.zeros((bs, n_bert), dtype=torch.float, device=ids.device)
+    n_seqs_exp = torch.cat([n.repeat(n) for n in n_seqs])
+    
+    one_idx = n_seqs == 1
+    one_idx_exp = n_seqs_exp == 1
+
+    idxs = torch.arange(bs)
+    idxs_exp = torch.cat([torch.full((n,), i)  for i, n in enumerate(n_seqs)])
+    
+    if torch.any(one_idx): x_bert[one_idx] = apply_bert(ids[one_idx_exp], bert)
+        
+    for idx in idxs[~one_idx]:
+        for i, id in enumerate(ids[idxs_exp==idx]):
+            if i == 0:
+                x_bert[idx] = apply_bert(id.view(1, -1), bert)
+            else:
+                x_bert[idx] = seq_add(x_bert[idx], apply_bert(id.view(1, -1), bert))
+                #torch.cat((x_bert[idx].view(1,-1), apply_bert(id.view(1, -1), bert))).max(dim=0).values # / n_seqs[idx].float()
+        
+    return x_bert
+
+
+class AddSeq(nn.Module):
+    def __init__(self, n_h):
+        super().__init__()
+        self.lin = nn.Linear(n_h, n_h)
+        self.ln = nn.LayerNorm(n_h)
+        self.apply(self._init_weights)
+
+    def forward(self, x1, x2):
+        return self.ln(x1 + x2)
+
+    def _init_weights(self, module):
+        """ Initialize the weights """
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        if isinstance(module, nn.Linear) and module.bias is not None:
+            module.bias.data.zero_()
 
 
 class CustomBert7(nn.Module):
     def __init__(self, n_h, n_feats, n_bert=768):
         super().__init__()
         self.n_bert = n_bert
+        self.q_add = AddSeq(n_bert)
+        self.a_add = AddSeq(n_bert)
         self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
         self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
         self.head = HeadNet2(n_h, n_feats, n_bert=n_bert)
     
     def forward(self, x_feats, q_ids, a_ids, n_q_seqs, n_a_seqs):
-        bs = x_feats.size(0)
-        q_ids = convert_listy(q_ids)
-        a_ids = convert_listy(a_ids)
-        x_q_bert = torch.zeros((bs, self.n_bert), dtype=torch.float, device=x_feats.device)
-        x_a_bert = torch.zeros((bs, self.n_bert), dtype=torch.float, device=x_feats.device)
-        n_q_seqs_exp = torch.cat([n.repeat(n) for n in n_q_seqs])
-        n_a_seqs_exp = torch.cat([n.repeat(n) for n in n_a_seqs])
-        
-        one_q_idx = n_q_seqs == 1
-        one_a_idx = n_a_seqs == 1
-        one_q_idx_exp = n_q_seqs_exp == 1
-        one_a_idx_exp = n_a_seqs_exp == 1
-
-        q_idxs = torch.arange(bs)
-        a_idxs = torch.arange(bs)
-        q_idxs_exp = torch.cat([torch.full((n,), i)  for i, n in enumerate(n_q_seqs)])
-        a_idxs_exp = torch.cat([torch.full((n,), i)  for i, n in enumerate(n_a_seqs)])
-        
-        x_q_bert[one_q_idx] = apply_bert(q_ids[one_q_idx_exp], self.q_bert)
-        x_a_bert[one_a_idx] = apply_bert(a_ids[one_a_idx_exp], self.a_bert)
-        
-        for q_idx in q_idxs[~one_q_idx]:
-            x_q_bert[q_idx] = apply_bert(q_ids[q_idxs_exp==q_idx], self.q_bert).mean(dim=0)
-        for a_idx in a_idxs[~one_a_idx]:
-            x_a_bert[a_idx] = apply_bert(a_ids[a_idxs_exp==a_idx], self.a_bert).mean(dim=0)
-
+        x_q_bert = apply_bert_batch(q_ids, n_q_seqs, self.n_bert, self.q_bert, self.q_add)
+        x_a_bert = apply_bert_batch(a_ids, n_a_seqs, self.n_bert, self.a_bert, self.a_add)
         return self.head(x_feats, x_q_bert, x_a_bert)

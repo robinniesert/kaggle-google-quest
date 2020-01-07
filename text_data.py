@@ -1,5 +1,6 @@
 import numpy as np
 import random
+import torch
 from torch.utils.data import Dataset
 
 from common import N_TARGETS
@@ -162,17 +163,20 @@ class TextDataset7(Dataset):
         self.x_features = x_features[idxs].astype(np.float32)
         if targets is not None: self.targets = targets[idxs].astype(np.float32)
         else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)
+        self.longest_idx = np.argmax(
+            [len(q_seq) + len(a_seqs) for q_seq, a_seqs in zip(self.question_ids, self.answer_ids)])
+
 
     def __getitem__(self, idx):
         q_ids = self.question_ids[idx]
         n_q_seq = len(q_ids)
         if n_q_seq > 1: q_ids = np.vstack(q_ids)
-        else: q_ids = q_ids[0].reshape(1,-1)
+        else: q_ids = q_ids[0]
 
         a_ids = self.answer_ids[idx]
         n_a_seq = len(a_ids)
         if n_a_seq > 1: a_ids = np.vstack(a_ids)
-        else: a_ids = a_ids[0].reshape(1,-1)
+        else: a_ids = a_ids[0]
 
         x_feats = self.x_features[idx]
         target = self.targets[idx]
@@ -180,3 +184,26 @@ class TextDataset7(Dataset):
 
     def __len__(self):
         return len(self.x_features)
+
+
+T = lambda x: torch.tensor(x)
+
+
+def collate_fn(batch):
+    x_feats, q_ids, a_ids, n_q_seq, n_a_seq, targets = [], [], [], [], [], []
+    for b in batch:
+        (x, q, a, n_q, n_a), t = b
+        x_feats.append(x)
+        q_ids.append(q)
+        a_ids.append(a)
+        n_q_seq.append(n_q)
+        n_a_seq.append(n_a)
+        targets.append(t)
+
+    x_feats = T(np.vstack(x_feats))
+    q_ids = T(np.vstack(q_ids))
+    a_ids = T(np.vstack(a_ids))
+    n_q_seq = T(np.array(n_q_seq))
+    n_a_seq = T(np.array(n_a_seq))
+    target = T(np.vstack(targets))
+    return (x_feats, q_ids, a_ids, n_q_seq, n_a_seq), target

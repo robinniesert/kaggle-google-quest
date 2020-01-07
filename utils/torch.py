@@ -11,7 +11,6 @@ def to_numpy(x):
 
 def to_device(xs, device, no_wrap_for_singles=False):
     if isinstance(xs, tuple) or isinstance(xs, list):
-        print('hi')
         return [to_device(x, device, no_wrap_for_singles=True) for x in xs]
     else: 
         if no_wrap_for_singles: return xs.to(device)
