@@ -22,7 +22,6 @@ def round_preds(preds, thres=0.0, low_dec=1, low_num=1, high_dec=2, high_num=3):
 
 
 def spearmanr_np(preds, targets):
-    preds = round_preds(preds)
     score = 0
     for i in range(N_TARGETS):
         score_i = spearmanr(preds[:, i], targets[:, i]).correlation
@@ -54,19 +53,32 @@ class FocalLoss(nn.Module):
         else: return F_loss
 
 
+class MyRankingLoss(nn.MSELoss):
+    def forward(self, input, target):
+        input = torch.sigmoid(input)
+        n = input.size(0)
+        n_pairs = n // 2
+        n_tot_pairs = n_pairs + (n % 2)
+        loss = 0
+        for i in range(n_pairs):
+            dp = input[2*i] - input[(2*i)+1]
+            dy = target[2*i] - target[(2*i)+1]
+            loss += super().forward(dp, dy) / n_tot_pairs
+            
+        if n_tot_pairs > n_pairs:
+            dp = input[-2] - input[-1]
+            dy = target[-2] - target[-1]
+            loss += super().forward(dp, dy) / n_tot_pairs
+        return loss
+    
+
 class MixedLoss(nn.Module):
-    def __init__(self, weight_bce=1, weight_fl=0, alpha=1, gamma=2,
-                 pos_weight=N_TARGETS*[1.0]):
+    def __init__(self, pos_weight=N_TARGETS*[1.0]):
         super().__init__()
-        self.weight_bce = weight_bce
-        self.weight_fl = weight_fl
         pos_weight = torch.Tensor(pos_weight).cuda()
         self.bce = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
-        self.focal = FocalLoss(alpha, gamma, logits=True, reduce=True)
+        self.mrl = MyRankingLoss()
 
     def forward(self, input, target):
-        input = input.transpose(1, 2).transpose(2, 3).contiguous()
-        target = target.transpose(1, 2).transpose(2, 3).contiguous()
-        loss = (self.weight_bce * self.bce(input, target) 
-                + self.weight_fl * self.focal(input, target))
+        loss = (1. * self.bce(input, target) + 1. * self.mrl(input, target))
         return loss.mean()

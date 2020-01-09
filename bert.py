@@ -207,19 +207,14 @@ class Head2(nn.Module):
         )
         self.head_q = nn.Linear(2 * n_h, N_Q_TARGETS)
         self.head_a = nn.Linear(2 * n_h, N_A_TARGETS)
-        
-    def forward(self, x):
-        x_q = self.lin_q(torch.cat([x[0], x[1]], dim=1))
-        x_a = self.lin_a(torch.cat([x[0], x[2]], dim=1))
-        x = self.lin(torch.cat(x, dim=1))
+
+    def forward(self, x_feats, x_q_bert, x_a_bert):
+        x_q = self.lin_q(torch.cat([x_feats, x_q_bert], dim=1))
+        x_a = self.lin_a(torch.cat([x_feats, x_a_bert], dim=1))
+        x = self.lin(torch.cat([x_feats, x_q_bert, x_a_bert], dim=1))
         x_q = self.head_q(torch.cat([x, x_q], dim=1))
         x_a = self.head_a(torch.cat([x, x_a], dim=1))
         return torch.cat([x_q, x_a], dim=1)
-
-
-class HeadNet2(Head2):
-    def forward(self, x_feats, x_q_bert, x_a_bert):
-        return super().forward((x_feats, x_q_bert, x_a_bert))
 
 
 class CustomBert2(nn.Module):
@@ -227,7 +222,7 @@ class CustomBert2(nn.Module):
         super().__init__()
         self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
         self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.head = HeadNet2(n_h, n_feats)
+        self.head = Head2(n_h, n_feats)
     
     def forward(self, x_feats, q_ids, a_ids):
         q_att_mask = q_ids > 0
@@ -303,24 +298,32 @@ class HeadNet3(nn.Module):
     def forward(self, x_feats, x_q_bert, x_a_bert, att_mask):
         x = self.transformer(torch.cat([x_q_bert, x_a_bert], dim=1), att_mask)
         return self.head((x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1), x.mean(dim=1)))
+    
 
-
+class AvgPooledBert(nn.Module):
+    def __init__(self, ):
+        super().__init__()
+        # self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.bert = BertModel.from_pretrained('bert-base-uncased')
+    
+    def forward(self, ids):
+        att_mask = ids > 0
+        x_bert = self.bert(ids, attention_mask=att_mask)[0]
+        att_mask = att_mask.unsqueeze(-1)
+        return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
+    
+    
 class CustomBert3(nn.Module):
     def __init__(self, n_h, n_feats):
         super().__init__()
-        self.q_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.a_bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.head = HeadNet2(n_h, n_feats, n_bert=768)
+        self.bert = AvgPooledBert()
+        # self.q_bert = AvgPooledBert()
+        # self.a_bert = AvgPooledBert()
+        self.head = Head2(n_h, n_feats, n_bert=768)
     
     def forward(self, x_feats, q_ids, a_ids):
-        q_att_mask = q_ids > 0
-        a_att_mask = a_ids > 0
-        x_q_bert = self.q_bert(q_ids, attention_mask=q_att_mask)[0]
-        x_a_bert = self.a_bert(a_ids, attention_mask=a_att_mask)[0]
-        q_att_mask = q_att_mask.unsqueeze(-1)
-        a_att_mask = a_att_mask.unsqueeze(-1)
-        x_q_bert = (x_q_bert * q_att_mask).sum(dim=1) / q_att_mask.sum(dim=1)
-        x_a_bert = (x_a_bert * a_att_mask).sum(dim=1) / a_att_mask.sum(dim=1)
+        x_q_bert = self.bert(q_ids)
+        x_a_bert = self.bert(a_ids)
         return self.head(x_feats, x_q_bert, x_a_bert)
 
 
@@ -545,7 +548,7 @@ class CustomBert6(nn.Module):
 
 
 def apply_bert(x_ids, bert):
-    att_mask = x_ids
+    att_mask = x_ids > 0
     x_bert = bert(x_ids, attention_mask=att_mask)[0]
     att_mask = att_mask.unsqueeze(-1)
     return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
