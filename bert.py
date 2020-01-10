@@ -187,23 +187,23 @@ class MyTransformer(nn.Module):
 
 
 class Head2(nn.Module):
-    def __init__(self, n_h=512, n_feats=74, n_bert=768):
+    def __init__(self, n_h=512, n_feats=74, n_bert=768, dropout=0.2):
         super().__init__()
         n_x = n_feats + 2 * n_bert
         self.lin = nn.Sequential(
             nn.Linear(n_x, n_h),
             GELU(),
-            nn.Dropout(0.2),
+            nn.Dropout(dropout),
         )
         self.lin_q = nn.Sequential(
             nn.Linear(n_feats + n_bert, n_h),
             GELU(),
-            nn.Dropout(0.2),
+            nn.Dropout(dropout),
         )
         self.lin_a = nn.Sequential(
             nn.Linear(n_feats + n_bert, n_h),
             GELU(),
-            nn.Dropout(0.2)
+            nn.Dropout(dropout)
         )
         self.head_q = nn.Linear(2 * n_h, N_Q_TARGETS)
         self.head_a = nn.Linear(2 * n_h, N_A_TARGETS)
@@ -300,30 +300,24 @@ class HeadNet3(nn.Module):
         return self.head((x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1), x.mean(dim=1)))
     
 
-class AvgPooledBert(nn.Module):
-    def __init__(self, ):
-        super().__init__()
-        # self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        self.bert = BertModel.from_pretrained('bert-base-uncased')
-    
-    def forward(self, ids):
+class AvgPooledBert(BertModel):
+    def forward(self, ids, seg_ids=None):
         att_mask = ids > 0
-        x_bert = self.bert(ids, attention_mask=att_mask)[0]
+        x_bert = super().forward(ids, att_mask, token_type_ids=seg_ids)[0]
         att_mask = att_mask.unsqueeze(-1)
         return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
     
     
 class CustomBert3(nn.Module):
-    def __init__(self, n_h, n_feats):
+    def __init__(self, n_h, n_feats, dropout=0.0):
         super().__init__()
-        self.bert = AvgPooledBert()
-        # self.q_bert = AvgPooledBert()
-        # self.a_bert = AvgPooledBert()
+        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased')
         self.head = Head2(n_h, n_feats, n_bert=768)
     
-    def forward(self, x_feats, q_ids, a_ids):
-        x_q_bert = self.bert(q_ids)
-        x_a_bert = self.bert(a_ids)
+    def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):
+        x_q_bert = self.dropout(self.bert(q_ids, seg_q_ids))
+        x_a_bert = self.dropout(self.bert(a_ids, seg_a_ids))
         return self.head(x_feats, x_q_bert, x_a_bert)
 
 
@@ -358,7 +352,7 @@ class CustomBert4(nn.Module):
         super().__init__()
         self.bert = BertModel.from_pretrained(f'bert-{bert_type}-uncased')
         n_bert = 1024 if bert_type=='large' else 768
-        self.head = HeadNet2(n_h, n_cats, n_bert)
+        self.head = Head2(n_h, n_cats, n_bert)
 
     def forward(self, x_cats, ids, seg_ids):
         att_mask = ids > 0
