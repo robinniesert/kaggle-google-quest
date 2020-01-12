@@ -300,6 +300,12 @@ class HeadNet3(nn.Module):
         return self.head((x_feats, x_q_bert.mean(dim=1), x_a_bert.mean(dim=1), x.mean(dim=1)))
     
 
+class CLSPooledBert(BertModel):
+    def forward(self, ids, seg_ids=None):
+        att_mask = ids > 0
+        return super().forward(ids, att_mask, token_type_ids=seg_ids)[0][:,0,:]
+
+
 class AvgPooledBert(BertModel):
     def forward(self, ids, seg_ids=None):
         att_mask = ids > 0
@@ -309,15 +315,14 @@ class AvgPooledBert(BertModel):
     
     
 class CustomBert3(nn.Module):
-    def __init__(self, n_h, n_feats, dropout=0.0):
+    def __init__(self, n_h, n_feats):
         super().__init__()
-        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
-        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased')
+        self.bert = CLSPooledBert.from_pretrained('bert-base-uncased')
         self.head = Head2(n_h, n_feats, n_bert=768)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):
-        x_q_bert = self.dropout(self.bert(q_ids, seg_q_ids))
-        x_a_bert = self.dropout(self.bert(a_ids, seg_a_ids))
+        x_q_bert = self.bert(q_ids, seg_q_ids)
+        x_a_bert = self.bert(a_ids, seg_a_ids)
         return self.head(x_feats, x_q_bert, x_a_bert)
 
 
