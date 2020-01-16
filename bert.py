@@ -312,12 +312,23 @@ class AvgPooledBert(BertModel):
         x_bert = super().forward(ids, att_mask, token_type_ids=seg_ids)[0]
         att_mask = att_mask.unsqueeze(-1)
         return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
+
+    def resize_type_embeddings(self, new_num_types=None):
+        old_embeddings = self.embeddings.token_type_embeddings
+        model_embeds = self._get_resized_embeddings(old_embeddings, new_num_types)
+        self.embeddings.token_type_embeddings = model_embeds
+
+        if new_num_types is None: return model_embeds
+
+        self.config.type_vocab_size = new_num_types
+        self.type_vocab_size = new_num_types
+        return model_embeds
     
     
 class CustomBert3(nn.Module):
     def __init__(self, n_h, n_feats):
         super().__init__()
-        self.bert = CLSPooledBert.from_pretrained('bert-base-uncased')
+        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased')
         self.head = Head2(n_h, n_feats, n_bert=768)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):

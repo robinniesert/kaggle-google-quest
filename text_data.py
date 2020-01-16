@@ -158,7 +158,7 @@ class AugTextDataset(Dataset):
 class TextDataset5(Dataset):
 
     def __init__(self, x_features, question_ids, answer_ids, seg_question_ids, 
-                 seg_answer_ids, idxs, targets=None):
+                 seg_answer_ids, idxs, targets=None, standard_errors=None):
         self.question_ids = array_astype(question_ids[idxs], np.long)
         self.answer_ids = array_astype(answer_ids[idxs], np.long)
         self.seg_question_ids = array_astype(seg_question_ids[idxs], np.long)
@@ -166,6 +166,8 @@ class TextDataset5(Dataset):
         self.x_features = x_features[idxs].astype(np.float32)
         if targets is not None: self.targets = targets[idxs].astype(np.float32)
         else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)
+        if standard_errors is not None: self.ses = standard_errors[idxs]
+        else: self.ses = None
 
     def __getitem__(self, idx):
         q_ids = self.question_ids[idx]
@@ -174,6 +176,8 @@ class TextDataset5(Dataset):
         seg_a_ids = self.seg_answer_ids[idx]
         x_feats = self.x_features[idx]
         target = self.targets[idx]
+        if self.ses is not None:
+            target = np.clip(target + np.random.normal(scale=self.ses[idx]), 0, 1).astype(np.float32)
         return (x_feats, q_ids, a_ids, seg_q_ids, seg_a_ids), target
 
     def __len__(self):

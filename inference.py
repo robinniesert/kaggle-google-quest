@@ -25,6 +25,9 @@ def infer(model, loader, checkpoint_file=None, device=torch.device('cuda')):
     batch_sz = loader.batch_size
     predictions = np.zeros((n_obs, N_TARGETS))
 
+    currently_deterministic = torch.backends.cudnn.deterministic
+    torch.backends.cudnn.deterministic = True
+
     if checkpoint_file is not None:
         checkpoint = torch.load(checkpoint_file)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -37,5 +40,7 @@ def infer(model, loader, checkpoint_file=None, device=torch.device('cuda')):
             end_index = min(start_index + batch_sz, n_obs)
             batch_preds = infer_batch(inputs, model, device)
             predictions[start_index:end_index, :] += batch_preds
+
+    torch.backends.cudnn.deterministic = currently_deterministic
 
     return predictions
