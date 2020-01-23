@@ -30,7 +30,7 @@ class LRFinder():
         self.grad_accum = grad_accum
         os.makedirs(path, exist_ok=True)
     
-    def find_lr(self, model:Module, opt:torch.optim.Optimizer, dl:DataLoader, 
+    def find_lr(self, model:torch.nn.Module, opt:torch.optim.Optimizer, dl:DataLoader, 
                 loss_fn, plot:bool=True, skip_start:int=0, skip_end:int=5):
         torch.save({
             'model_state_dict': model.state_dict(),

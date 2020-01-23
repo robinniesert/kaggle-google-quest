@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from scipy.stats import spearmanr
 
-from common import N_TARGETS
+from common import N_TARGETS, TARGETS
 from utils.torch import to_numpy
 
 
@@ -21,17 +21,57 @@ def round_preds(preds, thres=0.0, low_dec=1, low_num=1, high_dec=2, high_num=3):
     return new_preds
 
 
-def spearmanr_np(preds, targets):
+def scale(x, d):
+    if d: return (x//(1/d))/d
+    else: return x
+
+
+def ahmet_round(preds, ds, indices):
+    new_preds = preds.copy()
+    for idx, d in zip(indices, ds):
+        new_preds[:,idx] = scale(preds[:,idx], d)
+    return new_preds
+
+
+def optimize_rounding_params(oofs, y, verbose=True):
+    opt_ds = []
+    opt_indices = []
+    for idx in range(N_TARGETS):
+        opt_score = 0
+        opt_d = None
+        for d in [5, 10, 15, 20, 33, 100, 200, None]:
+            score = spearmanr(scale(oofs[:,idx], d), y[:,idx])[0]
+            if score > opt_score:
+                opt_score = score
+                opt_d = d
+                if verbose: print(idx, d, score)
+        if opt_d:
+            opt_ds.append(opt_d)
+            opt_indices.append(idx)
+    return opt_ds, opt_indices
+
+
+def optimized_ahmet_round(oofs, y, verbose=True):
+    return ahmet_round(oofs, *optimize_rounding_params(oofs, y, verbose))
+
+
+hard_targets = ['question_not_really_a_question', 'question_type_spelling']
+def spearmanr_np(preds, targets, ix=None, ignore_hard_targets=False, optimized_rounding=False):
+    ix = ix if ix is not None else np.arange(preds.shape[0])
+    n_targets = N_TARGETS - ignore_hard_targets * len(hard_targets)
+    if optimized_rounding:
+        preds = optimized_ahmet_round(preds, targets, verbose=False)
     score = 0
-    for i in range(N_TARGETS):
-        score_i = spearmanr(preds[:, i], targets[:, i]).correlation
-        score += np.nan_to_num(score_i / N_TARGETS)
+    for i, t in enumerate(TARGETS):
+        if ignore_hard_targets and t in hard_targets: 
+            continue
+        score_i = spearmanr(preds[ix, i], targets[ix, i]).correlation
+        score += np.nan_to_num(score_i / n_targets) 
     return score
 
 
 def spearmanr_torch(preds, targets):
     return spearmanr_np(to_numpy(torch.sigmoid(preds)), to_numpy(targets))
-
 
 
 class FocalLoss(nn.Module):
