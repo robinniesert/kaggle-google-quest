@@ -6,8 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn
+from torch.distributions.bernoulli import Bernoulli
 
-from transformers import DistilBertModel, BertModel
+from transformers import DistilBertModel, BertModel, BertConfig
 from transformers.modeling_distilbert import MultiHeadSelfAttention
 
 from net import GELU, Attention, Attention2
@@ -312,7 +313,7 @@ class AvgPooledBert(BertModel):
         x_bert = super().forward(ids, att_mask, token_type_ids=seg_ids)[0]
         att_mask = att_mask.unsqueeze(-1)
         return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
-
+    
     def resize_type_embeddings(self, new_num_types=None):
         old_embeddings = self.embeddings.token_type_embeddings
         model_embeds = self._get_resized_embeddings(old_embeddings, new_num_types)
@@ -326,14 +327,22 @@ class AvgPooledBert(BertModel):
     
     
 class CustomBert3(nn.Module):
-    def __init__(self, n_h, n_feats):
+    def __init__(self, n_h, n_feats, bert_dropout=0.1, final_dropout=0.0, n_type_embeddings=None):
         super().__init__()
-        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased')
+        self.p = 1 - final_dropout
+        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased', config=BertConfig(hidden_dropout_prob=bert_dropout))
+        if n_type_embeddings is not None:
+            self.bert.resize_type_embeddings(n_type_embeddings)
         self.head = Head2(n_h, n_feats, n_bert=768)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):
         x_q_bert = self.bert(q_ids, seg_q_ids)
         x_a_bert = self.bert(a_ids, seg_a_ids)
+        if self.p < 1:
+            if self.training:
+                drop_mask = Bernoulli(torch.full_like(x_q_bert, self.p)).sample() / self.p
+                x_q_bert = x_q_bert * drop_mask
+                x_a_bert = x_a_bert * drop_mask
         return self.head(x_feats, x_q_bert, x_a_bert)
 
 

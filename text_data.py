@@ -236,3 +236,24 @@ def collate_fn(batch):
     n_a_seq = T(np.array(n_a_seq))
     target = T(np.vstack(targets))
     return (x_feats, q_ids, a_ids, n_q_seq, n_a_seq), target
+
+
+class BertDataset(Dataset):
+
+    def __init__(self, x_features, question_outputs, answer_outputs, idxs, 
+                 targets=None):
+        self.question_outputs = question_outputs.astype(np.float32)
+        self.answer_outputs = answer_outputs.astype(np.float32)
+        self.x_features = x_features[idxs].astype(np.float32)
+        if targets is not None: self.targets = targets[idxs].astype(np.float32)
+        else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)
+
+    def __getitem__(self, idx):
+        q_outputs = self.question_outputs[idx]
+        a_outputs = self.answer_outputs[idx]
+        x_feats = self.x_features[idx]
+        target = self.targets[idx]
+        return (x_feats, q_outputs, a_outputs), target
+
+    def __len__(self):
+        return len(self.x_features)

@@ -12,6 +12,7 @@ from utils.plotting import twin_plot
 from utils.helpers import update_avg, update_ewma_lst
 from utils.torch import to_device, to_cpu
 
+
 class Learner():
     EWMA_FACTOR = 0.9
     
@@ -75,6 +76,9 @@ class Learner():
         if self.eval_at_start:
             epoch = -1
             self.info('epoch {}: \t Start validation...'.format(epoch))
+
+            self.valid_preds, self.valid_targets = [], []
+
             self.model.eval()
             val_score, val_loss, val_metrics = self.valid_epoch()
             self.info(self._get_metric_string(
@@ -248,6 +252,7 @@ class Learner():
     def _update_top_models(self, epoch, score):
         self.save_model(self.checkpoint_file(epoch))
         self.top_scores.append((score, epoch))
+        self.top_epochs = [e for _, e in self.top_scores]
         if len(self.top_scores) > self.n_top_models:
             if self.minimize_score:
                 _, rm_epoch = self.top_scores.pop(

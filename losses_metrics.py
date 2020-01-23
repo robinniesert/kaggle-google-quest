@@ -3,10 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, rankdata
 
+from ranker_models import TransformerRanker
 from common import N_TARGETS
-from utils.torch import to_numpy
+from utils.torch import to_numpy, get_rank
 
 
 def my_round(x, num, dec=2):
@@ -31,7 +32,6 @@ def spearmanr_np(preds, targets):
 
 def spearmanr_torch(preds, targets):
     return spearmanr_np(to_numpy(torch.sigmoid(preds)), to_numpy(targets))
-
 
 
 class FocalLoss(nn.Module):
@@ -72,13 +72,26 @@ class MyRankingLoss(nn.MSELoss):
         return loss
     
 
-class MixedLoss(nn.Module):
-    def __init__(self, pos_weight=N_TARGETS*[1.0]):
+class SpearmanLoss(nn.Module):
+    def __init__(self, rank_net):
         super().__init__()
-        pos_weight = torch.Tensor(pos_weight).cuda()
-        self.bce = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight)
-        self.mrl = MyRankingLoss()
+        self.rank_net = rank_net
+        self.rank_net.eval()
+        self.mse_loss = nn.MSELoss()
 
     def forward(self, input, target):
-        loss = (1. * self.bce(input, target) + 1. * self.mrl(input, target))
-        return loss.mean()
+        input = self.rank_net(input.transpose(0, 1)).transpose(0, 1)
+        target = get_rank(target)
+        return self.mse_loss(input, target)
+
+
+class MixedLoss(nn.Module):
+    def __init__(self, rank_net, spearman_weight=1.0):
+        super().__init__()
+        self.bce = nn.L1Loss()#nn.BCEWithLogitsLoss(reduction='mean')
+        self.spearman_weight = spearman_weight
+        self.spl = SpearmanLoss(rank_net)
+
+    def forward(self, input, target):
+        loss = self.bce(torch.sigmoid(input), target) + self.spearman_weight * self.spl(torch.sigmoid(input), target)
+        return loss

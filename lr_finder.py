@@ -53,7 +53,6 @@ class LRFinder():
             if (i == 0) or (loss < best_loss): best_loss = loss
             if (loss / self.divergence_factor) > best_loss: break
             
-            
             if i % self.grad_accum == self.grad_accum - 1:
                 opt.step()
                 opt.zero_grad()
