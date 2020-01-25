@@ -158,7 +158,7 @@ class AugTextDataset(Dataset):
 class TextDataset5(Dataset):
 
     def __init__(self, x_features, question_ids, answer_ids, seg_question_ids, 
-                 seg_answer_ids, idxs, targets=None, standard_errors=None):
+                 seg_answer_ids, idxs, targets=None):
         self.question_ids = array_astype(question_ids[idxs], np.long)
         self.answer_ids = array_astype(answer_ids[idxs], np.long)
         self.seg_question_ids = array_astype(seg_question_ids[idxs], np.long)
@@ -166,8 +166,6 @@ class TextDataset5(Dataset):
         self.x_features = x_features[idxs].astype(np.float32)
         if targets is not None: self.targets = targets[idxs].astype(np.float32)
         else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)
-        if standard_errors is not None: self.ses = standard_errors[idxs]
-        else: self.ses = None
 
     def __getitem__(self, idx):
         q_ids = self.question_ids[idx]
@@ -176,8 +174,6 @@ class TextDataset5(Dataset):
         seg_a_ids = self.seg_answer_ids[idx]
         x_feats = self.x_features[idx]
         target = self.targets[idx]
-        if self.ses is not None:
-            target = np.clip(target + np.random.normal(scale=self.ses[idx]), 0, 1).astype(np.float32)
         return (x_feats, q_ids, a_ids, seg_q_ids, seg_a_ids), target
 
     def __len__(self):
@@ -254,6 +250,106 @@ class BertDataset(Dataset):
         x_feats = self.x_features[idx]
         target = self.targets[idx]
         return (x_feats, q_outputs, a_outputs), target
+
+    def __len__(self):
+        return len(self.x_features)
+
+
+def swap_random(seq):
+    idx = range(len(seq))
+    i1, i2 = random.sample(idx, 2)
+    seq[i1], seq[i2] = seq[i2], seq[i1]
+
+
+def construct_shuffled_seq(original_ids, sentence_ids, max_seq_len=512):
+    if len(sentence_ids) > 1:
+        sep_id = 102
+        ids = original_ids[:original_ids.index(sep_id)+1]
+        # random.shuffle(sentence_ids)
+        swap_random(sentence_ids)
+        for sent_ids in sentence_ids:
+            if len(ids) < max_seq_len - 1:
+                ids += sent_ids
+            else:
+                break
+        ids = ids[:max_seq_len-1] + [sep_id]
+        ids += (max_seq_len - len(ids)) * [0]
+        return np.array(ids)
+    else:
+        return np.array(original_ids)
+
+
+class AugTextDataset2(Dataset):
+
+    def __init__(self, x_features, question_ids, answer_ids, seg_question_ids, 
+                 seg_answer_ids, sent_question_ids, sent_answer_ids, idxs, targets=None):
+        self.question_ids = array_astype(question_ids[idxs], np.long)
+        self.answer_ids = array_astype(answer_ids[idxs], np.long)
+        self.seg_question_ids = array_astype(seg_question_ids[idxs], np.long)
+        self.seg_answer_ids = array_astype(seg_answer_ids[idxs], np.long)
+        self.sent_question_ids = sent_question_ids
+        self.sent_answer_ids = sent_answer_ids
+        self.x_features = x_features[idxs].astype(np.float32)
+        if targets is not None: self.targets = targets[idxs].astype(np.float32)
+        else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)
+
+    def __getitem__(self, idx):
+        if random.uniform(0, 1) > 0.5:
+            q_ids = self.question_ids[idx]
+        else:
+            q_ids = construct_shuffled_seq(list(self.question_ids[idx]), self.sent_question_ids[idx])
+        
+        if random.uniform(0, 1) > 0.5:
+            a_ids = self.answer_ids[idx]
+        else:
+            a_ids = construct_shuffled_seq(list(self.answer_ids[idx]), self.sent_answer_ids[idx])
+
+        seg_q_ids = self.seg_question_ids[idx]
+        seg_a_ids = self.seg_answer_ids[idx]
+        x_feats = self.x_features[idx]
+        target = self.targets[idx]
+        return (x_feats, q_ids, a_ids, seg_q_ids, seg_a_ids), target
+
+    def __len__(self):
+        return len(self.x_features)
+
+
+
+class AugTextDataset3(Dataset):
+
+    def __init__(self, x_features, question_ids, answer_ids, seg_question_ids, 
+                 seg_answer_ids, aug_question_ids, aug_answer_ids, aug_seg_question_ids, 
+                 aug_seg_answer_ids, idxs, targets=None):
+        self.question_ids = question_ids[idxs].astype(np.long)
+        self.answer_ids = answer_ids[idxs].astype(np.long)
+        self.seg_question_ids = seg_question_ids[idxs].astype(np.long)
+        self.seg_answer_ids = seg_answer_ids[idxs].astype(np.long)
+        self.aug_question_ids = aug_question_ids[idxs]
+        self.aug_answer_ids = aug_answer_ids[idxs]
+        self.aug_seg_question_ids = aug_seg_question_ids[idxs]
+        self.aug_seg_answer_ids = aug_seg_answer_ids[idxs]
+        self.x_features = x_features[idxs].astype(np.float32)
+        if targets is not None: self.targets = targets[idxs].astype(np.float32)
+        else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)
+
+    def __getitem__(self, idx):
+        if random.uniform(0, 1) > 0.5:
+            q_ids = self.question_ids[idx]
+            seg_q_ids = self.seg_question_ids[idx]
+        else:
+            q_ids = self.aug_question_ids[idx].astype(np.long)
+            seg_q_ids = self.aug_seg_question_ids[idx].astype(np.long)
+        
+        if random.uniform(0, 1) > 0.5:
+            a_ids = self.answer_ids[idx]
+            seg_a_ids = self.seg_answer_ids[idx]
+        else:
+            a_ids = self.aug_answer_ids[idx]
+            seg_a_ids = self.aug_seg_answer_ids[idx]
+
+        x_feats = self.x_features[idx]
+        target = self.targets[idx]
+        return (x_feats, q_ids, a_ids, seg_q_ids, seg_a_ids), target
 
     def __len__(self):
         return len(self.x_features)

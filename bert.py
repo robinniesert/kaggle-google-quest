@@ -327,13 +327,14 @@ class AvgPooledBert(BertModel):
     
     
 class CustomBert3(nn.Module):
-    def __init__(self, n_h, n_feats, bert_dropout=0.1, final_dropout=0.0, n_type_embeddings=None):
+    def __init__(self, n_h, n_feats, dropout=0.2, bert_config_params={}, 
+                 final_dropout=0.0, n_type_embeddings=None):
         super().__init__()
         self.p = 1 - final_dropout
-        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased', config=BertConfig(hidden_dropout_prob=bert_dropout))
+        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased', config=BertConfig(**bert_config_params))
         if n_type_embeddings is not None:
             self.bert.resize_type_embeddings(n_type_embeddings)
-        self.head = Head2(n_h, n_feats, n_bert=768)
+        self.head = Head2(n_h, n_feats, n_bert=768, dropout=dropout)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):
         x_q_bert = self.bert(q_ids, seg_q_ids)
