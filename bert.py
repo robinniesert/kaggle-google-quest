@@ -5,10 +5,8 @@ import gc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.utils.rnn as rnn
-from torch.distributions.bernoulli import Bernoulli
 
-from transformers import BertModel, BertConfig
+from transformers import BertModel
 
 from common import *
 
@@ -41,12 +39,6 @@ class Head2(nn.Module):
         return torch.cat([x_q, x_a], dim=1)
 
 
-class CLSPooledBert(BertModel):
-    def forward(self, ids, seg_ids=None):
-        att_mask = ids > 0
-        return super().forward(ids, att_mask, token_type_ids=seg_ids)[0][:,0,:]
-
-
 class AvgPooledBert(BertModel):
     def forward(self, ids, seg_ids=None):
         att_mask = ids > 0
@@ -54,35 +46,15 @@ class AvgPooledBert(BertModel):
         att_mask = att_mask.unsqueeze(-1)
         return (x_bert * att_mask).sum(dim=1) / att_mask.sum(dim=1)
     
-    def resize_type_embeddings(self, new_num_types=None):
-        old_embeddings = self.embeddings.token_type_embeddings
-        model_embeds = self._get_resized_embeddings(old_embeddings, new_num_types)
-        self.embeddings.token_type_embeddings = model_embeds
-
-        if new_num_types is None: return model_embeds
-
-        self.config.type_vocab_size = new_num_types
-        self.type_vocab_size = new_num_types
-        return model_embeds
-    
     
 class CustomBert3(nn.Module):
-    def __init__(self, n_h, n_feats, head_dropout=0.2, bert_config_params={}, 
-                 final_bert_dropout=0.0, n_type_embeddings=None):
+    def __init__(self, n_h, n_feats, head_dropout=0.2):
         super().__init__()
-        self.p = 1 - final_bert_dropout
-        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased', config=BertConfig(**bert_config_params))
-        if n_type_embeddings is not None:
-            self.bert.resize_type_embeddings(n_type_embeddings)
+        self.bert = AvgPooledBert.from_pretrained('bert-base-uncased')
         self.head = Head2(n_h, n_feats, n_bert=768, dropout=head_dropout)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):
         x_q_bert = self.bert(q_ids, seg_q_ids)
         x_a_bert = self.bert(a_ids, seg_a_ids)
-        if self.p < 1:
-            if self.training:
-                drop_mask = Bernoulli(torch.full_like(x_q_bert, self.p)).sample() / self.p
-                x_q_bert = x_q_bert * drop_mask
-                x_a_bert = x_a_bert * drop_mask
         return self.head(x_feats, x_q_bert, x_a_bert)
 

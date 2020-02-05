@@ -5,10 +5,8 @@ import gc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.utils.rnn as rnn
-from torch.distributions.bernoulli import Bernoulli
 
-from transformers import AlbertModel, AlbertConfig
+from transformers import AlbertModel
 
 from bert import GELU, Head2
 from common import *

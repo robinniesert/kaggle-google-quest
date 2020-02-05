@@ -8,7 +8,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from tqdm import tqdm_notebook as tqdm
 
-from utils.plotting import twin_plot
 from utils.helpers import update_avg, update_ewma_lst
 from utils.torch import to_device, to_cpu
 
@@ -326,24 +325,3 @@ class Learner():
                 inputs = self.to_device(inputs)
                 self.swa_model(inputs)
         self.swa_model.eval()
-
-    def plot_losses(self, smooth=True):
-        train_vals = self.smooth_train_losses if smooth else self.train_losses
-        twin_plot(train_vals, self.valid_losses, ax1_label='Step', 
-                  ax2_label='Epoch', y_label='Loss', label1='train', 
-                  label2='valid')
-        
-    def plot_lr(self):
-        plt.figure()
-        plt.title('LR')
-        plt.xlabel('Epoch')
-        plt.plot(self.lrs)
-    
-    def plot_metric(self, metric_name, smooth=True):
-        k = metric_name
-        ax1_label = 'Step' if self.metric_fns[k][1] == 'batch_end' else 'Epoch'
-        if smooth: train_vals = self.smooth_train_metrics[k] 
-        else: train_vals = self.train_metrics[k]
-        twin_plot(train_vals, self.valid_metrics[k], ax1_label=ax1_label, 
-                  ax2_label='Epoch', y_label=k, label1='train', label2='valid')
- 
