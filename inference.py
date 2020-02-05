@@ -19,8 +19,6 @@ def infer_batch(inputs, model, device, to_numpy=True):
 
 
 def infer(model, loader, checkpoint_file=None, device=torch.device('cuda')):
-
-    print(f'Starting inference for model: {checkpoint_file}')
     n_obs = len(loader.dataset)
     batch_sz = loader.batch_size
     predictions = np.zeros((n_obs, N_TARGETS))
@@ -29,6 +27,7 @@ def infer(model, loader, checkpoint_file=None, device=torch.device('cuda')):
     torch.backends.cudnn.deterministic = True
 
     if checkpoint_file is not None:
+        print(f'Starting inference for model: {checkpoint_file}')
         checkpoint = torch.load(checkpoint_file)
         model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)

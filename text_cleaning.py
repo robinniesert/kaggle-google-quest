@@ -1,122 +1,61 @@
+PHP_TOKEN = '[XMLPHP_TOKEN]'
+CODE_TOKEN = '[CODE_TOKEN]'
 
-import re
+def replace_php_xml_code_to_tag(text):
+    if '&lt;?' in text and '&gt;\n' in text:
+        begin_idx = text.index('&lt;?')
+        end_idx = text.rindex('&gt;\n')
+        return text[:begin_idx] + ' ' + PHP_TOKEN + ' \n' + text[end_idx+4:]
+    else:
+        return text
 
-# preprocessing from https://www.kaggle.com/wowfattie/3rd-place/data
+def clear_newline_in_code_block(row_info_l):
+    prev_indent_no = 0
+    new_l = []
+    for idx, (row, len_row, indent_nr, row_type) in enumerate(row_info_l):
+        if prev_indent_no > 0 and indent_nr == 0 and len_row == 0:
+            continue
+        new_l.append([row, len_row, indent_nr, row_type])
+        prev_indent_no = indent_nr
+        
+    return new_l
+    
+def replace_code_block(text):
+    row_l = text.split('\n')
+    row_info_l = [[row, len(row), len(row) - len(row.lstrip()),'NO_CODE'] for row in row_l]
+    
+    #row_info_l = clear_newline_in_code_block(row_info_l)
 
-puncts = [
-    ',', '.', '"', ':', ')', '(', '-', '!', '?', '|', ';', "'", '$', '&', 
-    '/', '[', ']', '>', '%', '=', '#', '*', '+', '\\', '•',  '~', '@', '£',
-    '·', '_', '{', '}', '©', '^', '®', '`',  '<', '→', '°', '€', '™', '›',  
-    '♥', '←', '×', '§', '″', '′', 'Â', '█', '½', 'à', '…', '\n', '\xa0', '\t',
-    '“', '★', '”', '–', '●', 'â', '►', '−', '¢', '²', '¬', '░', '¶', '↑', '±', 
-    '¿', '▾', '═', '¦', '║', '―', '¥', '▓', '—', '‹', '─', '\u3000', '\u202f',
-    '▒', '：', '¼', '⊕', '▼', '▪', '†', '■', '’', '▀', '¨', '▄', '♫', '☆', 'é', 
-    '¯', '♦', '¤', '▲', 'è', '¸', '¾', 'Ã', '⋅', '‘', '∞', '«', '∙', '）', '↓', 
-    '、', '│', '（', '»', '，', '♪', '╩', '╚', '³', '・', '╦', '╣', '╔', '╗', 
-    '▬', '❤', 'ï', 'Ø', '¹', '≤', '‡', '√'
-]
-mispell_dict = {
-    "aren't" : "are not",
-    "can't" : "cannot",
-    "couldn't" : "could not",
-    "couldnt" : "could not",
-    "didn't" : "did not",
-    "doesn't" : "does not",
-    "doesnt" : "does not",
-    "don't" : "do not",
-    "hadn't" : "had not",
-    "hasn't" : "has not",
-    "haven't" : "have not",
-    "havent" : "have not",
-    "he'd" : "he would",
-    "he'll" : "he will",
-    "he's" : "he is",
-    "i'd" : "I would",
-    "i'd" : "I had",
-    "i'll" : "I will",
-    "i'm" : "I am",
-    "isn't" : "is not",
-    "it's" : "it is",
-    "it'll":"it will",
-    "i've" : "I have",
-    "let's" : "let us",
-    "mightn't" : "might not",
-    "mustn't" : "must not",
-    "shan't" : "shall not",
-    "she'd" : "she would",
-    "she'll" : "she will",
-    "she's" : "she is",
-    "shouldn't" : "should not",
-    "shouldnt" : "should not",
-    "that's" : "that is",
-    "thats" : "that is",
-    "there's" : "there is",
-    "theres" : "there is",
-    "they'd" : "they would",
-    "they'll" : "they will",
-    "they're" : "they are",
-    "theyre":  "they are",
-    "they've" : "they have",
-    "we'd" : "we would",
-    "we're" : "we are",
-    "weren't" : "were not",
-    "we've" : "we have",
-    "what'll" : "what will",
-    "what're" : "what are",
-    "what's" : "what is",
-    "what've" : "what have",
-    "where's" : "where is",
-    "who'd" : "who would",
-    "who'll" : "who will",
-    "who're" : "who are",
-    "who's" : "who is",
-    "who've" : "who have",
-    "won't" : "will not",
-    "wouldn't" : "would not",
-    "you'd" : "you would",
-    "you'll" : "you will",
-    "you're" : "you are",
-    "you've" : "you have",
-    "'re": " are",
-    "wasn't": "was not",
-    "we'll":" will",
-    "didn't": "did not",
-    "tryin'":"trying"
-}
+    prev_indent_no = 0
+    code_start_flag = False
+    for idx, (row, len_row, indent_nr, row_type) in enumerate(row_info_l):    
+        if prev_indent_no == 0 and indent_nr > 0 and row_info_l[idx-1][3] == 'NO_CODE':
+            row_info_l[idx-1][3] = 'CODE_BEGIN'
+            row_info_l[idx][3] = 'CODE'
+            code_start_flag = True
 
+        # current row and next row are two \n\n
+        if row_info_l[idx-1][3] == 'CODE' and indent_nr == 0 and idx < len(row_info_l)-1 and row_info_l[idx][1] == 0 and row_info_l[idx+1][1] == 0:
+            row_info_l[idx-1][3] = 'CODE_END'
+            code_start_flag = False
 
-def clean_text(x):
-    x = str(x)
-    for punct in puncts:
-        x = x.replace(punct, f' {punct} ')
-    return x
+        if code_start_flag:
+            row_info_l[idx][3] = 'CODE'
+            if indent_nr == 0 and row_info_l[idx][1] == 0:
+                row_info_l[idx][3] = 'CODE_NEWLINE'
 
+        prev_indent_no = indent_nr
 
-def clean_numbers(x):
-    x = re.sub('[0-9]{5,}', '#####', x)
-    x = re.sub('[0-9]{4}', '####', x)
-    x = re.sub('[0-9]{3}', '###', x)
-    x = re.sub('[0-9]{2}', '##', x)
-    return x
+    proc_text = ''
+    for row, len_row, indent_nr, row_type in row_info_l: 
+        if row_type == 'CODE_BEGIN' and any(e in row for e in '=()[]{}&#@/_:'):
+            proc_text += (' ' + CODE_TOKEN + ' \n')
+            continue
 
-
-def _get_mispell(mispell_dict):
-    mispell_re = re.compile('(%s)' % '|'.join(mispell_dict.keys()))
-    return mispell_dict, mispell_re
-
-
-def replace_typical_misspell(text):
-    mispellings, mispellings_re = _get_mispell(mispell_dict)
-
-    def replace(match):
-        return mispellings[match.group(0)]
-
-    return mispellings_re.sub(replace, text)
-
-
-def clean_data(df, columns: list):
-    for col in columns:
-        df[col] = df[col].apply(lambda x: clean_numbers(x))
-        df[col] = df[col].apply(lambda x: replace_typical_misspell(x))
-        df[col] = df[col].apply(lambda x: clean_text(x.lower()))
-    return df
+        if (row_type == 'CODE_END' or row_type == 'CODE' or row_type == 'CODE_NEWLINE') and any(e in row for e in '=()[]{}&#@/_:'):
+            continue 
+            
+        proc_text += row
+        proc_text += '\n'        
+            
+    return proc_text

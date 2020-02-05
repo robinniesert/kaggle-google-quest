@@ -16,7 +16,7 @@ logs/
 folds/
 checkpoints/
 pretrained_models/
-bert_output/
+*_output/
 probs/
 
 papers/

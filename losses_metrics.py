@@ -37,20 +37,18 @@ def ahmet_round(preds, ds, indices):
     return new_preds
 
 
+ds = [4, 8, 16, 32, 64]#[5, 10, 15, 20, 33, 100, 200]
+
+
 def optimize_rounding_params(oofs, y, verbose=True, ix=None):
     ix = ix if ix is not None else np.arange(oofs.shape[0])
     opt_ds = []
     opt_indices = []
     for idx in range(N_TARGETS):
-        opt_score = 0
-        opt_d = None
-        for d in [5, 10, 15, 20, 33, 100, 200, None]:
-            score = spearmanr(scale(oofs[ix,idx], d), y[ix,idx])[0]
-            if score > opt_score:
-                opt_score = score
-                opt_d = d
-                if verbose: print(idx, d, score)
-        if opt_d:
+        scores = [np.nan_to_num(spearmanr(scale(oofs[ix,idx], d), y[ix,idx])[0]) for d in ds]
+        opt_d = ds[np.argmax(scores)]
+        if ((np.max(scores) - spearmanr(oofs[ix,idx], y[ix,idx])[0]) > 0.002):
+            if verbose: print(idx, opt_d, np.max(scores))
             opt_ds.append(opt_d)
             opt_indices.append(idx)
     return opt_ds, opt_indices
