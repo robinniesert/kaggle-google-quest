@@ -23,9 +23,9 @@ class AvgPooledAlbert(AlbertModel):
 class CustomAlbert(nn.Module):
     def __init__(self, n_h, n_feats, head_dropout=0.2):
         super().__init__()
-        self.q_albert = AvgPooledAlbert.from_pretrained('albert-large-v2')
-        self.a_albert = AvgPooledAlbert.from_pretrained('albert-large-v2')
-        self.head = Head2(n_h, n_feats, n_bert=1024, dropout=head_dropout)
+        self.q_albert = AvgPooledAlbert.from_pretrained('albert-base-v2')
+        self.a_albert = AvgPooledAlbert.from_pretrained('albert-base-v2')
+        self.head = Head2(n_h, n_feats, n_bert=768, dropout=head_dropout)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):
         x_q_bert = self.q_albert(q_ids, seg_q_ids)
