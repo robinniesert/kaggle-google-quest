@@ -12,6 +12,12 @@ from bert import GELU, Head2
 from common import *
 
 
+class CLSPooledAlbert(AlbertModel):
+    def forward(self, ids, seg_ids=None):
+        att_mask = ids > 0
+        return super().forward(ids, att_mask, token_type_ids=seg_ids)[0][:,0,:]
+
+
 class AvgPooledAlbert(AlbertModel):
     def forward(self, ids, seg_ids=None):
         att_mask = ids > 0
@@ -23,8 +29,8 @@ class AvgPooledAlbert(AlbertModel):
 class CustomAlbert(nn.Module):
     def __init__(self, n_h, n_feats, head_dropout=0.2):
         super().__init__()
-        self.q_albert = AvgPooledAlbert.from_pretrained('albert-base-v2')
-        self.a_albert = AvgPooledAlbert.from_pretrained('albert-base-v2')
+        self.q_albert = CLSPooledAlbert.from_pretrained('albert-base-v2')
+        self.a_albert = CLSPooledAlbert.from_pretrained('albert-base-v2')
         self.head = Head2(n_h, n_feats, n_bert=768, dropout=head_dropout)
     
     def forward(self, x_feats, q_ids, a_ids, seg_q_ids=None, seg_a_ids=None):

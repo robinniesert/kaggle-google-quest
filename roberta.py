@@ -39,3 +39,27 @@ class CustomRoberta(nn.Module):
         x_a_bert = self.roberta(a_ids, seg_a_ids)
         return self.head(x_feats, x_q_bert, x_a_bert)
 
+
+class CLSPooledRoberta(RobertaModel):
+    def forward(self, ids, seg_ids=None):
+        att_mask = ids > 0
+        return super().forward(ids, att_mask, token_type_ids=seg_ids)[0][:,0,:]
+    
+    def resize_type_embeddings(self, new_num_types):
+        old_embeddings = self.embeddings.token_type_embeddings
+        model_embeds = self._get_resized_embeddings(old_embeddings, new_num_types)
+        self.embeddings.token_type_embeddings = model_embeds
+        self.config.type_vocab_size = new_num_types
+        self.type_vocab_size = new_num_types
+    
+    
+class CustomRoberta2(nn.Module):
+    def __init__(self, n_feats):
+        super().__init__()
+        self.roberta = CLSPooledRoberta.from_pretrained('roberta-base')
+        self.roberta.resize_type_embeddings(3)
+        self.head = nn.Linear(768 + n_feats, N_TARGETS)
+    
+    def forward(self, x_feats, ids, seg_ids=None):
+        x_bert = self.roberta(ids, seg_ids)
+        return self.head(torch.cat([x_feats, x_bert], dim=1))

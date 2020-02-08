@@ -85,3 +85,29 @@ def get_cvs(oofs, y, ix):
 
 def spearmanr_torch(preds, targets):
     return spearmanr_np(to_numpy(torch.sigmoid(preds)), to_numpy(targets))
+
+
+def binary_cross_entropy(input, target, eps=1e-7):
+    n = input.size(0)
+    input = torch.clamp(input, min=eps, max=1-eps).view(n, -1)
+    target = target.view(n, -1)
+    loss = - (target * torch.log(input) + (1 - target) * torch.log(1 - input)).mean()
+    return loss
+
+
+class SCELoss(nn.Module):
+    def __init__(self, alpha=1.0, A=-4, logits=True):
+        super(SCELoss, self).__init__()
+        self.alpha = alpha
+        self.exp_A = np.exp(A)
+        self.logits = logits
+
+    def forward(self, input, target):
+        input = torch.sigmoid(input) if self.logits else input
+        ce = binary_cross_entropy(input, target)
+
+        target = torch.clamp(target.float(), min=self.exp_A, max=1 - self.exp_A)
+        rce = binary_cross_entropy(target, input)
+
+        loss = (self.alpha * ce + rce) / (self.alpha + 1)
+        return loss
