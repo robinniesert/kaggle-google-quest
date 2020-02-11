@@ -31,12 +31,3 @@ def set_optimizer_mom(opt, mom):
     elif has_mom:
         for g in opt.param_groups:
             g['momentum'] = mom
-
-    
-def get_rank(x, dim=0):
-    bs = x.size(0)
-    device = x.device
-    x = to_numpy(x)
-    for i in range(N_TARGETS): x[:,i] = rankdata(x[:,i])
-    x = torch.tensor(x, device=device)
-    return (bs + 1 - x) / bs

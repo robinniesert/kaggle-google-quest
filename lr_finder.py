@@ -56,6 +56,7 @@ class LRFinder():
             if i % self.grad_accum == self.grad_accum - 1:
                 opt.step()
                 opt.zero_grad()
+                
             self.sched.step()
             
             self.losses.append(loss.item())

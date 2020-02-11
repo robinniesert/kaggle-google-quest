@@ -18,6 +18,7 @@ checkpoints/
 pretrained_models/
 *_output/
 probs/
+final_version/
 
 papers/
 old/

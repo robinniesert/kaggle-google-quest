@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from scipy.stats import spearmanr, rankdata
 
-from utils.torch import to_numpy, get_rank
+from utils.torch import to_numpy
 from common import N_TARGETS, TARGETS
 
 

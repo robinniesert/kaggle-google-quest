@@ -12,18 +12,6 @@ import numpy as np
 import torch
 
 
-def load_yaml(file_name):
-    with open(file_name, 'r') as stream:
-        result = yaml.load(stream, Loader=yaml.SafeLoader)
-    return result
-
-
-def load_json(file_name):
-    with open(file_name, 'r') as stream:
-        result = json.load(stream)
-    return result
-
-
 def init_seed(seed=100):
     os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
@@ -48,6 +36,10 @@ def init_logger(directory, log_file_name):
     return logger
 
 
+def update_avg(curr_avg, val, idx):
+    return (curr_avg * idx + val) / (idx + 1)
+    
+
 def update_ewma(prev_vals, val, factor):
     return val * (1 - factor) + prev_vals[-1] * factor
   
@@ -55,7 +47,3 @@ def update_ewma(prev_vals, val, factor):
 def update_ewma_lst(prev_vals, val, factor):
     if len(prev_vals)==0: prev_vals.append(val)
     else: prev_vals.append(update_ewma(prev_vals, val, factor))
-
-
-def update_avg(curr_avg, val, idx):
-    return (curr_avg * idx + val) / (idx + 1)
