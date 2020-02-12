@@ -1,20 +1,19 @@
 import numpy as np
 import pandas as pd
-
-from tqdm import tqdm_notebook as tqdm
+from tqdm import tqdm
 
 import torch
 
 from common import N_TARGETS
-from utils.torch import to_device
+from utils.torch import to_device, to_numpy
 
 
-def infer_batch(inputs, model, device, to_numpy=True):
+def infer_batch(inputs, model, device):
     inputs = to_device(inputs, device)
     predicted = model(*inputs)
     inputs = [x.cpu() for x in inputs]
     preds = torch.sigmoid(predicted)
-    if to_numpy: preds = preds.cpu().detach().numpy().astype(np.float32)
+    preds = to_numpy(preds).astype(np.float32)
     return preds
 
 

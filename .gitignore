@@ -11,7 +11,7 @@ proc_data/
 data/
 tmp/
 subs/
-oofs/
+oofs_old/
 logs/
 folds/
 checkpoints/

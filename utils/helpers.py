@@ -22,8 +22,7 @@ def init_seed(seed=100):
 
     
 def init_logger(directory, log_file_name):
-    formatter = logging.Formatter(
-        '\n%(asctime)s\t%(message)s', datefmt='%m/%d/%Y %H:%M:%S')
+    formatter = logging.Formatter( '\n%(asctime)s\t%(message)s', datefmt='%m/%d/%Y %H:%M:%S')
     log_path = Path(directory, log_file_name)
     if log_path.exists(): log_path.unlink()
     handler = logging.FileHandler(filename=log_path)
