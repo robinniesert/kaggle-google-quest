@@ -1,7 +1,5 @@
 import os
 import copy
-import matplotlib.pyplot as plt
-
 import torch
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import ReduceLROnPlateau

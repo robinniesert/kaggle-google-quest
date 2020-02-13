@@ -21,7 +21,7 @@ from tokenization import tokenize
 from learning import Learner
 from one_cycle import OneCycleLR
 from create_features import get_ohe_categorical_features
-from losses_metrics import spearmanr_torch, get_cvs
+from evaluation import spearmanr_torch, get_cvs
 from inference import infer
 
 from train import models, pretrained_models, get_optimizer_param_groups
