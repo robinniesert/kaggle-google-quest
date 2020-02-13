@@ -23,7 +23,7 @@ def apply_rounding(preds, ds, indices):
     return new_preds
 
 
-ds = [2, 4, 8, 16, 32, 64]
+ds = [4, 8, 16, 32, 64]
 
 
 def optimize_rounding_params(oofs, y, verbose=True, ix=None):

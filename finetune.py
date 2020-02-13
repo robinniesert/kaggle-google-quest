@@ -16,7 +16,7 @@ from transformers import AdamW
 from common import TARGETS, N_TARGETS
 from utils.helpers import init_logger, init_seed
 from utils.torch import to_numpy, to_device, to_cpu
-from datasets import TextDataset
+from datasets import TextDataset, TransformerOutputDataset
 from tokenization import tokenize
 from learning import Learner
 from one_cycle import OneCycleLR
@@ -82,7 +82,7 @@ if __name__=='__main__':
     log_dir = args.log_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
-    main_logger = init_logger(log_dir, f'train_main_{model_name}.log')
+    main_logger = init_logger(log_dir, f'finetune_main_{model_name}.log')
 
 
     # Import data
@@ -103,9 +103,9 @@ if __name__=='__main__':
     # Set training parameters
     device       = 'cuda'
     num_workers  = 10
-    n_folds      = 2
+    n_folds      = 10
     lr           = 1e-5
-    n_epochs     = 2
+    n_epochs     = 10
     bs           = 2
     grad_accum   = 4
     weight_decay = 0.01
@@ -117,24 +117,17 @@ if __name__=='__main__':
         X=train['question_body'], groups=train['question_body'])
     oofs = np.zeros((len(train), N_TARGETS))
 
-    main_logger.info(f'Start training model {model_name}...')
+    main_logger.info(f'Start finetuning model {model_name}...')
 
     for fold_id, (train_index, valid_index) in enumerate(folds):
         
         main_logger.info(f'Fold {fold_id + 1} started at {time.ctime()}')
         
-        fold_logger = init_logger(log_dir, f'train_fold_{fold_id+1}_{model_name}.log')
+        fold_logger = init_logger(log_dir, f'finetune_fold_{fold_id+1}_{model_name}.log')
         
-        train_loader = DataLoader(
+        loader = DataLoader(
             TextDataset(cat_features_train, ids_train['question'], ids_train['answer'],
-                        seg_ids_train['question'], seg_ids_train['answer'], 
-                        train_index, targets=y), 
-            batch_size=bs, shuffle=True, num_workers=num_workers
-        )
-        valid_loader = DataLoader(
-            TextDataset(cat_features_train, ids_train['question'], ids_train['answer'],
-                        seg_ids_train['question'], seg_ids_train['answer'],
-                        valid_index, targets=y), 
+                        seg_ids_train['question'], seg_ids_train['answer'], np.arange(len(train)), y), 
             batch_size=bs, shuffle=False, num_workers=num_workers
         )
         
@@ -143,17 +136,14 @@ if __name__=='__main__':
 
         # Get last hidden layer outputs from transformers
         fold_logger.info(f'Precompute transformer outputs for model {model_name}...')
-        q_outputs_train, a_outputs_train = get_model_outputs(
-            model, train_loader, checkpoint_file, device, model_type)
-        q_outputs_valid, a_outputs_valid = get_model_outputs(
-            model, valid_loader, checkpoint_file, device, model_type)
+        q_outputs, a_outputs = get_model_outputs(model, loader, checkpoint_file, device, model_type)
 
         train_loader = DataLoader(
-            BertDataset(cat_features_train, q_outputs_train, a_outputs_train, train_index, y), 
+            TransformerOutputDataset(cat_features_train, q_outputs, a_outputs, train_index, y), 
             batch_size=bs, shuffle=True, num_workers=num_workers
         )
         valid_loader = DataLoader(
-            BertDataset(cat_features_train, q_outputs_valid, a_outputs_valid, valid_index, y)
+            TransformerOutputDataset(cat_features_train, q_outputs, a_outputs, valid_index, y),
             batch_size=bs, shuffle=False, num_workers=num_workers, drop_last=False
         )
 
@@ -171,7 +161,7 @@ if __name__=='__main__':
             f'{model_name}_head_fold_{fold_id + 1}', 
             checkpoint_dir, 
             scheduler=None, 
-            metric_fns={'spearmanr': spearmanr_torch}, 
+            metric_spec={'spearmanr': spearmanr_torch}, 
             monitor_metric=True,
             minimize_score=False, 
             logger=fold_logger,
@@ -201,4 +191,5 @@ if __name__=='__main__':
     main_logger.info(get_cvs(oofs, y, ix))
 
     # Store OOFs
-    pd.DataFrame(oofs, columns=TARGETS).to_csv(f'oofs_old/{model_name}_tuned_oofs.csv')
+    os.makedirs('oofs/', exist_ok=True)
+    pd.DataFrame(oofs, columns=TARGETS).to_csv(f'oofs/{model_name}_tuned_oofs.csv')

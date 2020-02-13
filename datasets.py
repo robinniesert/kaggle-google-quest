@@ -35,8 +35,8 @@ class TransformerOutputDataset(Dataset):
 
     def __init__(self, x_features, question_outputs, answer_outputs, idxs, 
                  targets=None):
-        self.question_outputs = question_outputs.astype(np.float32)
-        self.answer_outputs = answer_outputs.astype(np.float32)
+        self.question_outputs = question_outputs[idxs].astype(np.float32)
+        self.answer_outputs = answer_outputs[idxs].astype(np.float32)
         self.x_features = x_features[idxs].astype(np.float32)
         if targets is not None: self.targets = targets[idxs].astype(np.float32)
         else: self.targets = np.zeros((self.x_features.shape[0], N_TARGETS), dtype=np.float32)

@@ -59,7 +59,8 @@ class Learner():
             
             self.validate(epoch)
             
-            if not self.batch_step_scheduler: self.scheduler.step()
+            if not self.batch_step_scheduler and self.scheduler is not None: 
+                self.scheduler.step()
                 
         self._on_training_end()
 
@@ -135,7 +136,8 @@ class Learner():
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-        if self.batch_step_scheduler: self.scheduler.step()
+        if self.batch_step_scheduler and self.scheduler is not None: 
+            self.scheduler.step()
         return preds, loss.item()
     
     def valid_batch(self, batch_inputs, batch_targets):

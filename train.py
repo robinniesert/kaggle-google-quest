@@ -52,11 +52,14 @@ def get_optimizer_param_groups(model, lr, weight_decay):
     return optimizer_grouped_parameters
 
 
-def get_optimizer(model, lr, weight_decay):
-    return AdamW(
-        get_optimizer_param_groups(model.head, lr, weight_decay)
-        + get_optimizer_param_groups(model.transformer, lr / 100, weight_decay)
-    )
+def get_optimizer(model, lr, weight_decay, model_type='siamese'):
+    param_groups = get_optimizer_param_groups(model.head, lr, weight_decay)
+    if model_type == 'siamese':
+        param_groups += get_optimizer_param_groups(model.transformer, lr / 100, weight_decay)
+    elif model_type == 'double':
+        param_groups += get_optimizer_param_groups(model.q_transformer, lr / 100, weight_decay)
+        param_groups += get_optimizer_param_groups(model.a_transformer, lr / 100, weight_decay)
+    return AdamW(param_groups)
 
 
 def build_parser():
@@ -74,6 +77,7 @@ if __name__=='__main__':
     args = parser.parse_args()
 
     model_name = args.model_name
+    model_type = 'double' if model_name == 'double_albert' else 'siamese'
     checkpoint_dir = args.checkpoint_dir
     log_dir = args.log_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -99,9 +103,9 @@ if __name__=='__main__':
     # Set training parameters
     device       = 'cuda'
     num_workers  = 10
-    n_folds      = 2
+    n_folds      = 10
     lr           = 0.001
-    n_epochs     = 2
+    n_epochs     = 10
     bs           = 2
     grad_accum   = 4
     weight_decay = 0.01
@@ -123,20 +127,18 @@ if __name__=='__main__':
         
         train_loader = DataLoader(
             TextDataset(cat_features_train, ids_train['question'], ids_train['answer'],
-                        seg_ids_train['question'], seg_ids_train['answer'], 
-                        train_index, targets=y), 
+                        seg_ids_train['question'], seg_ids_train['answer'], train_index, y), 
             batch_size=bs, shuffle=True, num_workers=num_workers
         )
         valid_loader = DataLoader(
             TextDataset(cat_features_train, ids_train['question'], ids_train['answer'],
-                        seg_ids_train['question'], seg_ids_train['answer'],
-                        valid_index, targets=y), 
+                        seg_ids_train['question'], seg_ids_train['answer'], valid_index, y), 
             batch_size=bs, shuffle=False, num_workers=num_workers
         )
         
         model = models[model_name]()
         
-        optimizer = get_optimizer(model, lr, weight_decay)
+        optimizer = get_optimizer(model, lr, weight_decay, model_type)
         scheduler = OneCycleLR(optimizer, n_epochs=n_epochs, n_batches=len(train_loader))
 
         learner = Learner(
@@ -171,4 +173,5 @@ if __name__=='__main__':
     main_logger.info(get_cvs(oofs, y, ix))
 
     # Store OOFs
-    pd.DataFrame(oofs, columns=TARGETS).to_csv(f'oofs_old/{model_name}_oofs.csv')
+    os.makedirs('oofs/', exist_ok=True)
+    pd.DataFrame(oofs, columns=TARGETS).to_csv(f'oofs/{model_name}_oofs.csv')
